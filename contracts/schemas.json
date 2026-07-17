@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "Citation": {
+      "type": "object",
+      "required": ["source_id", "chunk_id", "filename", "location", "quote"],
+      "properties": {
+        "source_id": {"type": "string"}, "chunk_id": {"type": "string"},
+        "filename": {"type": "string"}, "location": {"type": "string"},
+        "quote": {"type": "string"}
+      }
+    },
+    "Task": {
+      "type": "object",
+      "required": ["task_id", "type", "status", "stage", "progress", "trace_id"],
+      "properties": {
+        "task_id": {"type": "string"}, "type": {"type": "string"},
+        "status": {"enum": ["pending", "running", "succeeded", "failed", "cancelled"]},
+        "stage": {"type": "string"}, "progress": {"type": "integer", "minimum": 0, "maximum": 100},
+        "trace_id": {"type": "string"}, "error_code": {"type": ["string", "null"]},
+        "error_message": {"type": ["string", "null"]}
+      }
+    },
+    "Artifact": {
+      "type": "object",
+      "required": ["artifact_id", "project_id", "type", "version_no", "content", "citations", "warnings"],
+      "properties": {
+        "artifact_id": {"type": "string"}, "project_id": {"type": "string"},
+        "type": {"enum": ["lesson_plan", "slide_deck", "speaker_notes", "exercise_set"]},
+        "version_no": {"type": "integer", "minimum": 1}, "content": {},
+        "citations": {"type": "array", "items": {"$ref": "#/$defs/Citation"}},
+        "warnings": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}
+

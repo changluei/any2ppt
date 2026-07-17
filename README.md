@@ -1,0 +1,74 @@
+# 面向智慧教育的 AI 备课辅助系统（LessonDeck）
+
+面向小学教师的单课时备课工作台：上传教材/课标后建立可追溯知识库，由五类教学 Skills 和可见质量流程生成教学设计、12—18 页课件、逐页讲稿、分层练习，并支持局部修改、版本回滚、教师/学生双包导出。
+
+## 目录
+
+- `frontend/`：Vue 3、TypeScript、Vite、Pinia、Element Plus；五个主页面与三栏工作台。
+- `backend/app/`：FastAPI、SQLAlchemy/MySQL、上传、任务、产物版本、图状态、导出。
+- `backend/app/ai/`：DeepSeek 适配、可追溯检索、五类 Skills、完整生成、质量规则。
+- `contracts/`：跨模块 JSON Schema 与固定字段。
+- `deploy/`：MySQL 8、后端、前端一键编排。
+- `samples/`：无版权风险的自编演示资料；不包含预生成 AI 答案。
+- `tests/`：契约与端到端 smoke。
+
+## 一键启动
+
+1. 将 `.env.example` 复制为 `.env`，至少修改 MySQL 密码；要使用真实模型时填写 `DEEPSEEK_API_KEY`。
+2. 执行：
+
+```bash
+docker compose -f deploy/docker-compose.yml up --build
+```
+
+3. 打开前端 <http://localhost:5173>，Swagger 为 <http://localhost:8000/docs>，API/数据库诊断为 `/health` 和 `/health/db`。
+
+没有模型密钥时，系统会生成基于用户输入的“规则降级草案”，界面有醒目标识，绝不会冒充 DeepSeek 成功。上传 `samples/公开课例资料.md` 后可查看真实来源位置。
+
+停止服务（保留 MySQL 与 Chroma 数据）：
+
+```bash
+docker compose -f deploy/docker-compose.yml down
+```
+
+## 本地开发
+
+后端：
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements/base.txt -r requirements/ai.txt
+alembic upgrade head
+uvicorn app.main:app --reload
+```
+
+前端：
+
+```bash
+cd frontend
+pnpm install
+pnpm dev
+```
+
+验证：`pnpm typecheck && pnpm test && pnpm build`、`pytest backend/tests tests/contract`、`python tests/e2e/smoke.py`。
+
+## Windows PowerShell
+
+```powershell
+Copy-Item .env.example .env
+docker compose -f deploy/docker-compose.yml config
+docker compose -f deploy/docker-compose.yml up --build
+docker compose -f deploy/docker-compose.yml ps
+docker compose -f deploy/docker-compose.yml logs --tail 100 backend
+docker compose -f deploy/docker-compose.yml restart backend
+docker compose -f deploy/docker-compose.yml down
+```
+
+不使用 `down -v`，因此停止服务不会删除数据库卷。密钥、上传文件、导出包、MySQL 和检索持久化目录均已从 Git 排除。
+
+## 当前边界
+
+首版聚焦小学单课时，不提供复杂权限、在线协作、拖拽式 PPT 编辑或扫描 PDF OCR。Slidev 以安全 Markdown 预览和源码导出为主，HTML/PDF 可在后续接入独立渲染容器。
+
