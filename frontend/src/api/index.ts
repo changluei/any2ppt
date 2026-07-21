@@ -1,16 +1,11 @@
 import { http } from './http'
-import type { Project, Source, Task, Artifact, GraphState } from '../types'
+import type { Project, Task, Artifact, GraphState } from '../types'
 export type ProjectInput = Omit<Project,'id'|'status'|'created_at'|'updated_at'>
 export const api = {
   health: () => http.get('/health').then(r=>r.data),
   projects: () => http.get<Project[]>('/api/projects').then(r=>r.data),
   project: (id:string) => http.get<Project>(`/api/projects/${id}`).then(r=>r.data),
   createProject: (data:ProjectInput) => http.post<Project>('/api/projects',data).then(r=>r.data),
-  sources: (id:string) => http.get<Source[]>(`/api/projects/${id}/sources`).then(r=>r.data),
-  upload: (id:string,file:File,onProgress?:(v:number)=>void) => { const form=new FormData(); form.append('file',file); return http.post<Source>(`/api/projects/${id}/sources`,form,{onUploadProgress:e=>onProgress?.(e.total?Math.round(e.loaded/e.total*100):0)}).then(r=>r.data) },
-  retrySource: (pid:string,sid:string) => http.post(`/api/projects/${pid}/sources/${sid}/index`).then(r=>r.data),
-  deleteSource: (pid:string,sid:string) => http.delete(`/api/projects/${pid}/sources/${sid}`),
-  search: (id:string,query:string,top_k=5) => http.post(`/api/projects/${id}/search`,{query,top_k}).then(r=>r.data),
   skills: () => http.get('/api/skills').then(r=>r.data),
   createTask: (id:string,data:Record<string,unknown>) => http.post<Task>(`/api/projects/${id}/tasks`,data).then(r=>r.data),
   tasks: (id:string) => http.get<Task[]>(`/api/projects/${id}/tasks`).then(r=>r.data),
