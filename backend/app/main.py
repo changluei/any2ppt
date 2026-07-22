@@ -1,16 +1,34 @@
 import uuid
-from fastapi import FastAPI, Request, HTTPException
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
-from app.core.config import get_settings
-from app.core.database import get_db
+
 from app.ai.skills import registry
-from app.api.routes import projects, sources, tasks, artifacts, workflow
+from app.ai.vector_store import ProjectVectorStore
+from app.api.routes import artifacts, projects, sources, tasks, workflow
+from app.core.config import get_settings
+from app.core.database import SessionLocal
 
 settings = get_settings()
-app = FastAPI(title=settings.app_name, version="1.0.0", description="小学单课时 AI 备课、可追溯 RAG、版本化产物与双包导出")
-app.add_middleware(CORSMiddleware, allow_origins=[item.strip() for item in settings.cors_origins.split(",") if item.strip()], allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
+app = FastAPI(
+    title=settings.app_name,
+    version="1.0.0",
+    description="小学单课时 AI 备课、可追溯 RAG、版本化产物与双包导出服务。",
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origin_list,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+def _trace_id(request: Request) -> str:
+    return getattr(request.state, "trace_id", str(uuid.uuid4()))
 
 
 @app.middleware("http")
@@ -23,12 +41,48 @@ async def trace_middleware(request: Request, call_next):
 
 @app.exception_handler(HTTPException)
 async def http_error(request: Request, exc: HTTPException):
-    return JSONResponse(status_code=exc.status_code, content={"error": {"code": f"HTTP_{exc.status_code}", "message": exc.detail, "trace_id": request.state.trace_id}})
+    detail = exc.detail
+    if isinstance(detail, dict):
+        error = {
+            "code": detail.get("code") or f"HTTP_{exc.status_code}",
+            "message": detail.get("message") or detail.get("detail") or "请求失败",
+            "trace_id": _trace_id(request),
+        }
+        for key in ("current_version", "details", "blockers", "source_ids"):
+            if key in detail:
+                error[key] = detail[key]
+    else:
+        error = {"code": f"HTTP_{exc.status_code}", "message": str(detail), "trace_id": _trace_id(request)}
+    return JSONResponse(status_code=exc.status_code, content={"error": error})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": {
+                "code": "VALIDATION_ERROR",
+                "message": "请求参数校验失败",
+                "details": exc.errors(),
+                "trace_id": _trace_id(request),
+            }
+        },
+    )
 
 
 @app.exception_handler(Exception)
 async def unhandled_error(request: Request, exc: Exception):
-    return JSONResponse(status_code=500, content={"error": {"code": "INTERNAL_ERROR", "message": "服务暂时不可用，请凭 trace_id 排查", "trace_id": request.state.trace_id}})
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": {
+                "code": "INTERNAL_ERROR",
+                "message": "服务暂时不可用，请凭 trace_id 排查",
+                "trace_id": _trace_id(request),
+            }
+        },
+    )
 
 
 @app.get("/health")
@@ -38,16 +92,42 @@ def health():
 
 @app.get("/health/db")
 def health_db():
-    db = next(get_db())
     try:
-        db.execute(text("SELECT 1")); return {"status": "ok", "database": "mysql"}
-    except Exception:
-        raise HTTPException(503, "MySQL 暂时不可用")
-    finally: db.close()
+        with SessionLocal() as db:
+            db.execute(text("SELECT 1"))
+        database = "sqlite" if settings.database_url.startswith("sqlite") else "mysql"
+        return {"status": "ok", "database": database}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "DATABASE_ERROR", "message": "数据库暂时不可用，请稍后重试"},
+        ) from exc
+
+
+@app.get("/health/ai")
+def health_ai():
+    configured = bool(settings.deepseek_api_key.strip())
+    return {
+        "status": "ok" if configured else "degraded",
+        "provider": "deepseek",
+        "configured": configured,
+        "model": settings.deepseek_model,
+    }
+
+
+@app.get("/health/chroma")
+def health_chroma():
+    store = ProjectVectorStore()
+    return {
+        "status": "ok",
+        "path": str(store.root),
+        "backend": "chromadb" if store.client else "json-fallback",
+    }
 
 
 @app.get("/api/skills")
-def skills(): return registry()
+def skills():
+    return registry()
 
 
 app.include_router(projects.router)

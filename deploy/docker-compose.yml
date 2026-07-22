@@ -7,7 +7,7 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-change_me}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_change_me}
     command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
-    ports: ["3306:3306"]
+    ports: ["${MYSQL_HOST_PORT:-3306}:3306"]
     volumes: ["mysql_data:/var/lib/mysql"]
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "--password=${MYSQL_ROOT_PASSWORD:-root_change_me}"]
@@ -21,6 +21,7 @@ services:
         required: false
     environment:
       MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
       CHROMA_PERSIST_DIR: /app/data/chroma
       UPLOAD_DIR: /app/data/uploads
       EXPORT_DIR: /app/data/exports

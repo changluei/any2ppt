@@ -54,9 +54,9 @@ class SearchResult(BaseModel):
 
 
 class TaskCreate(BaseModel):
-    type: str
-    selected_source_ids: list[str] = []
-    teacher_requirements: str = ""
+    type: str = Field(min_length=1, max_length=64)
+    selected_source_ids: list[str] = Field(default_factory=list)
+    teacher_requirements: str = Field(default="", max_length=3000)
     idempotency_key: str = Field(min_length=3, max_length=100)
 
 
@@ -71,6 +71,8 @@ class TaskOut(ORMModel):
     result_artifact_id: Optional[str]
     error_code: Optional[str]
     error_message: Optional[str]
+    started_at: Optional[datetime]
+    finished_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime
 
@@ -101,3 +103,27 @@ class HumanDecision(BaseModel):
 
 class ExportCreate(BaseModel):
     package_type: Literal["teacher", "student"]
+    artifact_version_ids: list[str] = Field(default_factory=list, max_length=20)
+
+
+class GraphStartRequest(BaseModel):
+    task_id: Optional[str] = None
+    thread_id: Optional[str] = None
+    checkpoint_ref: Optional[str] = None
+
+
+class GraphRunOut(ORMModel):
+    id: str
+    project_id: str
+    task_id: str
+    thread_id: str
+    checkpoint_ref: Optional[str]
+    attempt: int
+    status: str
+    current_node: str
+    nodes: list[dict[str, Any]]
+    issues: list[dict[str, Any]]
+    state_snapshot: dict[str, Any]
+    human_decision: Optional[str]
+    created_at: datetime
+    updated_at: datetime

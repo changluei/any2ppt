@@ -10,11 +10,16 @@ dist/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+pytest-cache-files-*/
+backend/pytest-cache-files-*/
+.pytest-temp/
 .mypy_cache/
 .coverage
 htmlcov/
 data/*
 !data/.gitkeep
+backend/data/*
+!backend/data/.gitkeep
 backend/uploads/
 backend/exports/
 backend/chroma/
