@@ -81,7 +81,8 @@ def index_source(source_id: str) -> None:
         blocks = parse_document(Path(source.storage_path))
         source.status = "indexing"
         db.commit()
-        chunks = split_blocks(blocks, source.id)
+        settings = get_settings()
+        chunks = split_blocks(blocks, source.id, settings.ai_chunk_size, settings.ai_chunk_overlap)
         ProjectVectorStore().add_documents(source.project_id, source.id, source.original_name, chunks)
         source.status = "ready"
         source.error_message = None

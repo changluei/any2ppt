@@ -56,6 +56,18 @@ pnpm dev
 
 ## Windows PowerShell
 
+首次创建后端虚拟环境并安装依赖：
+
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements/base.txt -r requirements/ai.txt -r requirements/dev.txt
+.\.venv\Scripts\python.exe -m pytest tests -q
+cd ..
+```
+
+如果系统没有全局 `python` 命令，可使用已安装 Python 的完整路径执行 `-m venv backend\.venv`。后续所有后端命令均使用 `backend\.venv\Scripts\python.exe`，避免污染系统环境。
+
 ```powershell
 Copy-Item .env.example .env
 docker compose -f deploy/docker-compose.yml config

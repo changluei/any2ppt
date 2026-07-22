@@ -23,6 +23,8 @@ backend/data/*
 backend/uploads/
 backend/exports/
 backend/chroma/
+backend/data/chroma/chroma.sqlite3
+backend/data/chroma/*/
 *.log
 .DS_Store
 .idea/

@@ -1,0 +1,22 @@
+[
+  {"source_id":"science-01","filename":"科学教材.md","content":"蒸发是水从液态变成气态并进入空气的过程，温度升高和空气流动会加快蒸发。","query":"水蒸发后去了哪里","category":"教材知识点"},
+  {"source_id":"science-02","filename":"科学教材.md","content":"水蒸气遇冷会凝结成小水滴，杯壁上的水珠来自空气中的水蒸气。","query":"杯壁水珠是怎样形成的","category":"教材知识点"},
+  {"source_id":"science-03","filename":"科学教材.md","content":"绿色植物利用光能制造养料并释放氧气，这一过程称为光合作用。","query":"植物怎样利用阳光制造养料","category":"教材知识点"},
+  {"source_id":"science-04","filename":"科学教材.md","content":"磁铁有南极和北极，同极相斥、异极相吸，磁力可以隔着薄物体起作用。","query":"两个磁铁同极靠近会怎样","category":"教材知识点"},
+  {"source_id":"science-05","filename":"科学教材.md","content":"声音由物体振动产生，振动停止后发声也会停止。","query":"声音产生的根本原因是什么","category":"教材知识点"},
+  {"source_id":"science-06","filename":"科学教材.md","content":"简单电路必须形成闭合通路，电池、导线和用电器连接完整时灯泡才能发光。","query":"灯泡发光需要怎样的电路","category":"教材知识点"},
+  {"source_id":"science-07","filename":"科学教材.md","content":"光沿直线传播，不透明物体挡住光时会在背光面形成影子。","query":"影子为什么会出现在物体后面","category":"教材知识点"},
+  {"source_id":"science-08","filename":"科学教材.md","content":"月相是人从地球上看到的月球被太阳照亮部分的形状变化。","query":"月相变化指的是什么","category":"教材知识点"},
+  {"source_id":"science-09","filename":"科学教材.md","content":"水循环包括蒸发、凝结、降水和汇集，太阳能和重力推动水不断循环。","query":"水循环包括哪些主要环节","category":"教材知识点"},
+  {"source_id":"standard-01","filename":"课程标准.md","content":"科学课程强调学生提出问题、作出假设、收集证据、形成解释并交流反思。","query":"科学探究活动应培养哪些过程能力","category":"课标"},
+  {"source_id":"standard-02","filename":"课程标准.md","content":"小学数学学习应让学生在真实情境中理解数量关系，并用数学语言表达推理过程。","query":"数学课标如何要求学生表达推理","category":"课标"},
+  {"source_id":"standard-03","filename":"课程标准.md","content":"语文课程重视有感情地朗读、积累语言、理解文本内容并表达独特感受。","query":"语文阅读学习重视哪些能力","category":"课标"},
+  {"source_id":"activity-01","filename":"课堂活动.md","content":"教师可让学生比较盖盖子和不盖盖子的两杯水，记录水量变化并解释蒸发现象。","query":"怎样设计观察蒸发的对比实验","category":"课堂活动"},
+  {"source_id":"activity-02","filename":"课堂活动.md","content":"电路探究活动先让学生预测连接结果，再动手连接、记录现象并修正电路图。","query":"简单电路课可以怎样组织探究","category":"课堂活动"},
+  {"source_id":"activity-03","filename":"课堂活动.md","content":"影子活动让学生改变光源、物体和屏的位置，比较影子的方向与大小。","query":"怎样探究影子大小和方向","category":"课堂活动"},
+  {"source_id":"assessment-01","filename":"评价建议.md","content":"评价教学目标时可用出口条，让学生写出一个关键概念和一个仍有疑问的问题。","query":"课堂结束怎样快速评价学习目标","category":"评价"},
+  {"source_id":"assessment-02","filename":"评价建议.md","content":"分层练习分为基础、巩固和提高，分别检查概念识别、方法应用和迁移解释。","query":"分层练习三个层次分别评价什么","category":"评价"},
+  {"source_id":"assessment-03","filename":"评价建议.md","content":"合作探究评价应同时记录证据使用、表达交流和小组协作，不只看最终答案。","query":"合作探究评价不能只看什么","category":"评价"},
+  {"source_id":null,"filename":"","content":"","query":"quantumXYZ","category":"无答案"},
+  {"source_id":null,"filename":"","content":"","query":"marsColonyZXQ","category":"无答案"}
+]

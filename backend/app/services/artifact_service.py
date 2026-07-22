@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.ai.generation import generate_lesson_bundle, revise_block
-from app.ai.graph import initial_node_state, review_artifacts
+from app.ai.graph import initial_node_state, review_quality
 from app.ai.schemas import LessonContext
 from app.core.database import SessionLocal
 from app.models import AITask, ArtifactVersion, GraphRun, LessonArtifact, Project
@@ -73,7 +73,7 @@ def run_generation_task(task_id: str) -> None:
         task.stage = "模型生成"
         task.progress = 45
         db.commit()
-        bundle = generate_lesson_bundle(context)
+        bundle = generate_lesson_bundle(context, trace_id=task.trace_id)
         if db.get(AITask, task_id).status == "cancelled":
             db.close()
             return
@@ -98,11 +98,12 @@ def run_generation_task(task_id: str) -> None:
             status="awaiting_confirmation",
             current_node="human_confirm",
             nodes=initial_node_state(),
-            issues=review_artifacts(bundle.artifacts),
+            issues=review_quality(bundle.artifacts, trace_id=task.trace_id),
             state_snapshot={
                 "degraded": bundle.degraded,
                 "model": bundle.model,
                 "citations": [c.model_dump() for c in bundle.citations],
+                "trace": bundle.trace.model_dump(mode="json") if bundle.trace else None,
             },
         )
         for node in graph.nodes:
@@ -129,13 +130,13 @@ def revise_artifact(db: Session, artifact: LessonArtifact, base_version_no: int,
     if artifact.current_version_no != base_version_no:
         raise RuntimeError(f"VERSION_CONFLICT:{artifact.current_version_no}")
     current = artifact.versions[-1]
-    content, changed_ids = revise_block(current.content, target_type, target_id, instruction)
+    content, changed_ids = revise_block(current.content, target_type, target_id, instruction, citations=current.citations)
     save_version(db, artifact.project_id, artifact.type, content, current.citations, current.warnings, "local_revision", changed_ids)
     if sync_related and artifact.type == "slide_deck" and target_type == "slide":
         notes = db.query(LessonArtifact).filter_by(project_id=artifact.project_id, type="speaker_notes").with_for_update().first()
         if notes and notes.versions:
             note_current = notes.versions[-1]
-            note_content, note_ids = revise_block(note_current.content, "note", target_id, f"同步课件修改：{instruction}")
+            note_content, note_ids = revise_block(note_current.content, "note", target_id, f"同步课件修改：{instruction}", citations=note_current.citations)
             save_version(db, artifact.project_id, notes.type, note_content, note_current.citations, note_current.warnings, "synced_revision", note_ids)
     db.commit()
     db.refresh(artifact)

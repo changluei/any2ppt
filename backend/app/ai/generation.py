@@ -1,74 +1,396 @@
+from __future__ import annotations
+
 import json
-from .llm_client import DeepSeekClient
-from .schemas import Citation, GenerationBundle, LessonContext
-from .vector_store import ProjectVectorStore
+import time
+import uuid
+from copy import deepcopy
+from typing import Any
+
+from pydantic import BaseModel
+
 from .exceptions import AIConfigurationError
+from .llm_client import DeepSeekClient
+from .schemas import (
+    Activity,
+    Assessment,
+    Citation,
+    Exercise,
+    GenerationBundle,
+    LessonBlueprint,
+    LessonContext,
+    Objective,
+    SkillRequest,
+    Slide,
+    SpeakerNote,
+    TraceInfo,
+)
+from .skills import SlideOutline, run_skill
+from .vector_store import ProjectVectorStore
 
 
-def _citations(rows: list[dict]) -> list[Citation]:
-    return [Citation(source_id=r["source_id"], chunk_id=r["chunk_id"], filename=r["filename"], location=r["location"], quote=r["content"][:220]) for r in rows]
+class LocalRevisionOutput(BaseModel):
+    changed_block: dict[str, Any]
 
 
-def _rule_based_bundle(context: LessonContext, citations: list[Citation]) -> GenerationBundle:
-    """透明的规则降级草案：由输入动态构造，不冒充模型结果。"""
-    topic, grade = context.lesson_topic, context.grade
-    objectives = [
-        {"id": "OBJ-1", "behavior": f"能用自己的语言说明“{topic}”的核心概念", "condition": "在阅读资料和课堂讨论后", "criterion": "表达包含至少两个关键信息"},
-        {"id": "OBJ-2", "behavior": f"能运用“{topic}”相关知识完成基础任务", "condition": "在例题或情境任务中", "criterion": "正确率达到 80%"},
+def _dedupe_citations(citations: list[Citation]) -> list[Citation]:
+    unique: dict[tuple[str, str], Citation] = {}
+    for citation in citations:
+        unique[(citation.source_id, citation.chunk_id)] = citation
+    return list(unique.values())
+
+
+def _fallback_outlines(context: LessonContext) -> list[SlideOutline]:
+    titles = [
+        "课题与学习任务", "情境问题", "说说已有经验", "本课学习目标", "观察资料",
+        "发现关键信息", "合作探究", "交流与质疑", "方法梳理", "例题示范",
+        "基础练习", "巩固练习", "提高挑战", "易错提醒", "课堂小结", "自我评价",
     ]
-    stages = [
-        {"id": "STAGE-1", "name": "情境导入", "time_minutes": 5, "teacher_actions": "用贴近生活的问题引出课题", "student_actions": "观察、猜想并说出已有经验", "objective_ids": ["OBJ-1"], "assessment": "口头诊断"},
-        {"id": "STAGE-2", "name": "探究新知", "time_minutes": 20, "teacher_actions": "呈现证据并组织合作探究", "student_actions": "阅读、讨论、归纳", "objective_ids": ["OBJ-1", "OBJ-2"], "assessment": "过程观察与追问"},
-        {"id": "STAGE-3", "name": "分层练习", "time_minutes": 12, "teacher_actions": "提供由易到难的任务并反馈", "student_actions": "独立完成后互相说明思路", "objective_ids": ["OBJ-2"], "assessment": "练习正确率"},
-        {"id": "STAGE-4", "name": "总结迁移", "time_minutes": 3, "teacher_actions": "引导提炼方法并布置迁移问题", "student_actions": "总结收获并自评", "objective_ids": ["OBJ-1", "OBJ-2"], "assessment": "出口条"},
+    return [
+        SlideOutline(
+            title=title,
+            teaching_stage=("STAGE-1" if index <= 4 else "STAGE-2" if index <= 10 else "STAGE-3" if index <= 14 else "STAGE-4"),
+            objective_ids=["OBJ-1"] if index <= 8 else ["OBJ-2"] if index <= 14 else ["OBJ-1", "OBJ-2"],
+            purpose=f"围绕“{context.lesson_topic}”形成可观察的学习证据",
+        )
+        for index, title in enumerate(titles, 1)
     ]
-    slides = []
-    slide_titles = ["课题与学习任务", "生活中的问题", "我们已经知道什么", "本课学习目标", "资料观察", "关键概念", "合作探究", "方法梳理", "例题示范", "基础练习", "巩固练习", "提高挑战", "易错提醒", "课堂小结", "自我评价"]
-    for i, title in enumerate(slide_titles, 1):
-        stage = stages[min((i - 1) // 4, 3)]
-        slides.append({"slide_id": f"SLIDE-{i:02d}", "order": i, "title": title, "layout": "default", "markdown": f"# {title}\n\n{topic} · {grade}\n\n> 请结合课堂互动补充内容", "teaching_stage": stage["id"], "objective_ids": stage["objective_ids"], "citations": [c.model_dump() for c in citations[:1]] if 5 <= i <= 8 else []})
-    notes = [{"slide_id": s["slide_id"], "explanation": f"围绕“{s['title']}”组织简洁讲解，并根据学生反馈追问。", "questions": [f"你从这一页发现了什么？为什么？"], "expected_answers": ["学生结合观察说出理由"], "transition": "接下来我们把发现用于新的任务。", "board_notes": s["title"], "estimated_minutes": 3} for s in slides]
-    exercises = [
-        {"exercise_id": "EX-1", "level": "基础", "objective_ids": ["OBJ-1"], "question": f"用一句话说明“{topic}”的核心意思。", "type": "简答", "difficulty": 1, "answer": "依据课堂归纳作答。", "explanation": "检查核心概念是否准确。", "source": "generated", "needs_teacher_review": True},
-        {"exercise_id": "EX-2", "level": "巩固", "objective_ids": ["OBJ-2"], "question": f"选择一个课堂情境，运用“{topic}”相关方法完成任务。", "type": "应用", "difficulty": 2, "answer": "答案随具体情境确定。", "explanation": "关注方法应用过程。", "source": "generated", "needs_teacher_review": True},
-        {"exercise_id": "EX-3", "level": "提高", "objective_ids": ["OBJ-1", "OBJ-2"], "question": f"比较两种解决“{topic}”问题的方法并说明选择。", "type": "开放题", "difficulty": 3, "answer": "观点合理且证据充分即可。", "explanation": "评价迁移与论证能力。", "source": "generated", "needs_teacher_review": True},
+
+
+def _normalize_outlines(
+    context: LessonContext,
+    outlines: list[SlideOutline],
+    objective_ids: set[str],
+    stage_ids: set[str],
+) -> list[SlideOutline]:
+    normalized = list(outlines[:18])
+    fallback = _fallback_outlines(context)
+    while len(normalized) < 12:
+        normalized.append(fallback[len(normalized)])
+    safe: list[SlideOutline] = []
+    default_ids = sorted(objective_ids)[:1]
+    default_stage = sorted(stage_ids)[0]
+    for outline in normalized:
+        ids = [item for item in outline.objective_ids if item in objective_ids] or default_ids
+        stage = outline.teaching_stage if outline.teaching_stage in stage_ids else default_stage
+        safe.append(outline.model_copy(update={"objective_ids": ids, "teaching_stage": stage}))
+    return safe
+
+
+def _normalize_blueprint_links(
+    objectives: list[Objective],
+    activities: list[Activity],
+    assessments: list[Assessment],
+) -> tuple[list[Activity], list[Assessment], bool]:
+    valid_ids = {item.id for item in objectives}
+    first_id = objectives[0].id
+    changed = False
+    safe_activities: list[Activity] = []
+    for item in activities:
+        ids = [objective_id for objective_id in item.objective_ids if objective_id in valid_ids]
+        if not ids:
+            ids = [first_id]
+        changed = changed or ids != item.objective_ids
+        safe_activities.append(item.model_copy(update={"objective_ids": ids}))
+    safe_assessments: list[Assessment] = []
+    for item in assessments:
+        ids = [objective_id for objective_id in item.objective_ids if objective_id in valid_ids]
+        if not ids:
+            ids = [first_id]
+        changed = changed or ids != item.objective_ids
+        safe_assessments.append(item.model_copy(update={"objective_ids": ids}))
+    activity_coverage = {objective_id for item in safe_activities for objective_id in item.objective_ids}
+    assessment_coverage = {objective_id for item in safe_assessments for objective_id in item.objective_ids}
+    for objective in objectives:
+        if objective.core and objective.id not in activity_coverage:
+            first = safe_activities[0]
+            safe_activities[0] = first.model_copy(update={"objective_ids": list(dict.fromkeys(first.objective_ids + [objective.id]))})
+            changed = True
+        if objective.core and objective.id not in assessment_coverage:
+            first = safe_assessments[0]
+            safe_assessments[0] = first.model_copy(update={"objective_ids": list(dict.fromkeys(first.objective_ids + [objective.id]))})
+            changed = True
+    return safe_activities, safe_assessments, changed
+
+
+def _normalize_exercise_links(exercises: list[Exercise], objectives: list[Objective]) -> tuple[list[Exercise], bool]:
+    valid_ids = {item.id for item in objectives}
+    first_id = objectives[0].id
+    changed = False
+    safe: list[Exercise] = []
+    for exercise in exercises:
+        ids = [objective_id for objective_id in exercise.objective_ids if objective_id in valid_ids] or [first_id]
+        changed = changed or ids != exercise.objective_ids
+        safe.append(exercise.model_copy(update={"objective_ids": ids}))
+    coverage = {objective_id for item in safe for objective_id in item.objective_ids}
+    for objective in objectives:
+        if objective.core and objective.id not in coverage:
+            target = safe[-1]
+            safe[-1] = target.model_copy(update={"objective_ids": list(dict.fromkeys(target.objective_ids + [objective.id]))})
+            changed = True
+    return safe, changed
+
+
+def _allocate_note_minutes(slides: list[SlideOutline], activities: list[Activity]) -> list[int]:
+    total = sum(activity.time_minutes for activity in activities)
+    if not slides:
+        return []
+    base, remainder = divmod(total, len(slides))
+    minutes = [base] * len(slides)
+    for index in range(remainder):
+        minutes[index] += 1
+    return minutes
+
+
+def _materialize_artifacts(
+    context: LessonContext,
+    blueprint: LessonBlueprint,
+    outlines: list[SlideOutline],
+    exercises: list[Exercise],
+) -> dict[str, dict[str, Any]]:
+    objective_ids = {item.id for item in blueprint.objectives}
+    outlines = _normalize_outlines(context, outlines, objective_ids, {item.id for item in blueprint.activities})
+    source_slides = set(range(5, min(9, len(outlines) + 1)))
+    slides: list[Slide] = []
+    for index, outline in enumerate(outlines, 1):
+        citations = blueprint.citations[:2] if index in source_slides else []
+        evidence_line = "\n\n> 资料依据可在来源面板查看" if citations else ""
+        markdown = f"# {outline.title}\n\n{outline.purpose}\n\n**学习主题：** {context.lesson_topic}{evidence_line}"
+        slides.append(
+            Slide(
+                slide_id=f"SLIDE-{index:02d}",
+                order=index,
+                title=outline.title,
+                markdown=markdown,
+                teaching_stage=outline.teaching_stage,
+                objective_ids=outline.objective_ids,
+                citations=citations,
+            )
+        )
+
+    note_minutes = _allocate_note_minutes(outlines, blueprint.activities)
+    notes = [
+        SpeakerNote(
+            slide_id=slide.slide_id,
+            explanation=f"围绕“{slide.title}”进行简洁讲解，先让学生表达，再根据回答追问理由。",
+            questions=[f"关于“{slide.title}”，你观察到了什么？依据是什么？"],
+            expected_answers=["学生结合本页信息和已有经验说明发现与理由。"],
+            transition="接下来把这一发现用于下一个学习任务。",
+            board_notes=slide.title,
+            estimated_minutes=note_minutes[index],
+        )
+        for index, slide in enumerate(slides)
     ]
-    common = {"citations": [c.model_dump() for c in citations]}
+    citation_dicts = [item.model_dump(mode="json") for item in blueprint.citations]
     artifacts = {
-        "lesson_plan": {"title": f"{topic} 教学设计", "grade": grade, "objectives": objectives, "key_points": [f"理解并应用{topic}的核心知识"], "difficult_points": ["把概念迁移到新情境"], "stages": stages, **common},
-        "slide_deck": {"deck_title": topic, "theme": "seriph", "slides": slides, **common},
-        "speaker_notes": {"notes": notes},
-        "exercise_set": {"exercises": exercises},
+        "lesson_plan": {
+            "title": blueprint.title,
+            "grade": blueprint.grade,
+            "subject": blueprint.subject,
+            "objectives": [item.model_dump(mode="json") for item in blueprint.objectives],
+            "key_points": blueprint.key_points,
+            "difficult_points": blueprint.difficult_points,
+            "stages": [item.model_dump(mode="json") for item in blueprint.activities],
+            "assessments": [item.model_dump(mode="json") for item in blueprint.assessments],
+            "teaching_strategies": blueprint.teaching_strategies,
+            "citations": citation_dicts,
+        },
+        "slide_deck": {
+            "deck_title": context.lesson_topic,
+            "theme": "seriph",
+            "slides": [item.model_dump(mode="json") for item in slides],
+            "citations": citation_dicts,
+        },
+        "speaker_notes": {"notes": [item.model_dump(mode="json") for item in notes]},
+        "exercise_set": {"exercises": [item.model_dump(mode="json") for item in exercises]},
     }
-    warning = "未配置或无法调用 DeepSeek；当前为规则生成的降级草案，必须由教师确认，不代表模型生成成功。"
-    if not citations:
-        warning += " 当前没有可追溯资料，通用建议未附引用。"
-    return GenerationBundle(artifacts=artifacts, citations=citations, warnings=[warning], model="rule-based-fallback", degraded=True)
+    return artifacts
 
 
-def generate_lesson_bundle(context: LessonContext) -> GenerationBundle:
-    rows = ProjectVectorStore().similarity_search(context.project_id, f"{context.lesson_topic} 课程标准 教学目标 重点", 8, context.selected_source_ids or None)
-    citations = _citations(rows)
-    evidence = "\n".join(f"[{i + 1}] {c.filename} {c.location}: {c.quote}" for i, c in enumerate(citations)) or "无可用资料"
-    system = "你是小学教师备课助手。只输出 JSON；引用只能使用给出的证据。目标、活动、评价编号必须对应。课件 12-18 页。原创练习标记 source=generated 和 needs_teacher_review=true。"
-    prompt = f"课程上下文：{context.model_dump_json()}\n证据：{evidence}\n输出 artifacts（lesson_plan/slide_deck/speaker_notes/exercise_set）、warnings。"
-    try:
-        data, result = DeepSeekClient().invoke_json(system, prompt)
-        return GenerationBundle(artifacts=data["artifacts"], citations=citations, warnings=data.get("warnings", []), model=result.model)
-    except AIConfigurationError:
-        return _rule_based_bundle(context, citations)
+def build_lesson_blueprint(
+    context: LessonContext,
+    *,
+    llm=None,
+    store: ProjectVectorStore | None = None,
+    trace_id: str | None = None,
+) -> tuple[LessonBlueprint, list[SlideOutline], list[Exercise], list, bool]:
+    vector_store = store or ProjectVectorStore()
+    run_trace = trace_id or str(uuid.uuid4())
+    responses = []
+
+    standard = run_skill(
+        "course_standard_interpretation",
+        SkillRequest(context=context),
+        llm=llm,
+        store=vector_store,
+        trace_id=run_trace,
+    )
+    responses.append(standard)
+    objectives_response = run_skill(
+        "learning_objectives",
+        SkillRequest(context=context, parameters={"course_standard": standard.result}),
+        llm=llm,
+        store=vector_store,
+        trace_id=run_trace,
+    )
+    responses.append(objectives_response)
+    activities_response = run_skill(
+        "teaching_activities",
+        SkillRequest(context=context, parameters={"objectives": objectives_response.result["objectives"]}),
+        llm=llm,
+        store=vector_store,
+        trace_id=run_trace,
+    )
+    responses.append(activities_response)
+
+    objectives = [Objective.model_validate(item) for item in objectives_response.result["objectives"]]
+    activities = [Activity.model_validate(item) for item in activities_response.result["activities"]]
+    assessments = [Assessment.model_validate(item) for item in activities_response.result["assessments"]]
+    activities, assessments, links_changed = _normalize_blueprint_links(objectives, activities, assessments)
+    citations = _dedupe_citations([citation for response in responses for citation in response.citations])
+    warnings = list(dict.fromkeys(warning for response in responses for warning in response.warnings))
+    if links_changed:
+        warnings.append("已按教学目标自动修正活动与评价中的目标编号关联，请教师复核。")
+    blueprint = LessonBlueprint(
+        title=f"{context.lesson_topic} 教学设计",
+        grade=context.grade,
+        subject=context.subject,
+        objectives=objectives,
+        key_points=objectives_response.result["key_points"],
+        difficult_points=objectives_response.result["difficult_points"],
+        activities=activities,
+        assessments=assessments,
+        teaching_strategies=["问题驱动", "合作探究", "分层评价"],
+        citations=citations,
+        warnings=warnings,
+    )
+
+    slide_response = run_skill(
+        "slide_narrative",
+        SkillRequest(context=context, parameters={"blueprint": blueprint.model_dump(mode="json")}),
+        llm=llm,
+        store=vector_store,
+        trace_id=run_trace,
+    )
+    exercise_response = run_skill(
+        "exercise_assessment",
+        SkillRequest(context=context, parameters={"objectives": [item.model_dump() for item in objectives]}),
+        llm=llm,
+        store=vector_store,
+        trace_id=run_trace,
+    )
+    responses.extend([slide_response, exercise_response])
+    blueprint.citations = _dedupe_citations([citation for response in responses for citation in response.citations])
+    blueprint.warnings = list(dict.fromkeys(warning for response in responses for warning in response.warnings))
+    outlines = [SlideOutline.model_validate(item) for item in slide_response.result["slides"]]
+    exercises = [Exercise.model_validate(item) for item in exercise_response.result["exercises"]]
+    exercises, exercise_links_changed = _normalize_exercise_links(exercises, objectives)
+    if exercise_links_changed:
+        blueprint.warnings.append("已按教学目标自动修正练习中的目标编号关联，请教师复核。")
+    return blueprint, outlines, exercises, responses, any(response.degraded for response in responses)
 
 
-def revise_block(content: dict, target_type: str, target_id: str, instruction: str) -> tuple[dict, list[str]]:
+def generate_lesson_bundle(
+    context: LessonContext,
+    *,
+    llm=None,
+    store: ProjectVectorStore | None = None,
+    trace_id: str | None = None,
+) -> GenerationBundle:
+    started = time.perf_counter()
+    run_trace = trace_id or str(uuid.uuid4())
+    blueprint, outlines, exercises, responses, degraded = build_lesson_blueprint(
+        context,
+        llm=llm,
+        store=store,
+        trace_id=run_trace,
+    )
+    artifacts = _materialize_artifacts(context, blueprint, outlines, exercises)
+    warnings = list(blueprint.warnings)
+    if degraded:
+        warnings.append("当前产物包含规则降级内容，不代表 DeepSeek 生成成功，必须由教师确认。")
+    warnings = list(dict.fromkeys(warnings))
+    models = [response.trace.model for response in responses if response.trace.model != "rule-based-fallback"]
+    model = models[0] if models else "rule-based-fallback"
+    trace = TraceInfo(
+        trace_id=run_trace,
+        model=model,
+        model_status="degraded" if degraded else "succeeded",
+        elapsed_ms=int((time.perf_counter() - started) * 1000),
+        retrieval_count=sum(response.trace.retrieval_count for response in responses),
+        attempts=sum(response.trace.attempts for response in responses),
+        usage=None,
+    )
+    return GenerationBundle(
+        artifacts=artifacts,
+        citations=blueprint.citations,
+        warnings=warnings,
+        model=model,
+        degraded=degraded,
+        trace=trace,
+    )
+
+
+def _rule_revision(block: dict[str, Any], target_type: str, instruction: str) -> dict[str, Any]:
+    revised = deepcopy(block)
+    clean_instruction = instruction.strip()
+    if target_type == "slide":
+        markdown = revised.get("markdown", "")
+        if any(word in clean_instruction for word in ("精简", "简洁", "减少文字")):
+            lines = [line for line in markdown.splitlines() if line.strip()]
+            revised["markdown"] = "\n\n".join(lines[:3])
+        else:
+            revised["markdown"] = f"{markdown}\n\n> 教师调整要求：{clean_instruction}".strip()
+    elif target_type == "note":
+        revised["explanation"] = f"{revised.get('explanation', '')}\n教师调整：{clean_instruction}".strip()
+    elif target_type == "exercise":
+        if any(word in clean_instruction for word in ("简单", "降低难度", "容易")):
+            revised["difficulty"] = max(1, int(revised.get("difficulty", 2)) - 1)
+        if any(word in clean_instruction for word in ("困难", "提高难度", "挑战")):
+            revised["difficulty"] = min(5, int(revised.get("difficulty", 2)) + 1)
+        revised["question"] = f"{revised.get('question', '')}\n（教师要求：{clean_instruction}）".strip()
+        revised["needs_teacher_review"] = True
+    else:
+        revised["teacher_revision"] = clean_instruction
+    revised["revision_mode"] = "rule-based-fallback"
+    return revised
+
+
+def revise_block(
+    content: dict,
+    target_type: str,
+    target_id: str,
+    instruction: str,
+    *,
+    llm=None,
+    citations: list[dict] | None = None,
+) -> tuple[dict, list[str]]:
     updated = json.loads(json.dumps(content, ensure_ascii=False))
     collections = {"slide": "slides", "note": "notes", "exercise": "exercises"}
     key = collections.get(target_type, target_type)
     rows = updated.get(key, [])
     id_fields = {"slides": "slide_id", "notes": "slide_id", "exercises": "exercise_id"}
     id_field = id_fields.get(key, "id")
-    for row in rows:
-        if row.get(id_field) == target_id:
-            row["teacher_revision"] = instruction
-            return updated, [target_id]
+    for index, row in enumerate(rows):
+        if row.get(id_field) != target_id:
+            continue
+        client = llm or DeepSeekClient()
+        try:
+            if getattr(client, "configured", True) is False:
+                raise AIConfigurationError("模型未配置")
+            prompt = (
+                f"目标类型：{target_type}\n目标块：{json.dumps(row, ensure_ascii=False)}"
+                f"\n教师指令：{instruction}\n可用引用：{json.dumps(citations or [], ensure_ascii=False)}"
+                "\n只返回 changed_block，不得改动稳定 ID，不得重写其他块；事实变化只能使用给定引用。"
+            )
+            output, _ = client.invoke_structured(
+                "你是局部教学内容修改器。只输出 JSON。",
+                prompt,
+                LocalRevisionOutput,
+            )
+            changed = output.changed_block
+            changed[id_field] = target_id
+        except AIConfigurationError:
+            changed = _rule_revision(row, target_type, instruction)
+        rows[index] = changed
+        return updated, [target_id]
     raise ValueError("未找到要修改的目标内容")
-
