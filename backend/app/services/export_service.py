@@ -45,15 +45,35 @@ def _load_versions(db: Session, job: ExportJob) -> dict[str, ArtifactVersion]:
 
 def _write_slides(output: Path, slide_deck: dict) -> None:
     slides = slide_deck.get("slides", [])
+    frontmatter = (
+        "---\n"
+        f"theme: {slide_deck.get('theme', 'seriph')}\n"
+        f"title: {json.dumps(slide_deck.get('deck_title', 'LessonDeck'), ensure_ascii=False)}\n"
+        "download: false\n"
+        "---"
+    )
     (output / "slides.md").write_text(
-        "\n\n---\n\n".join(slide.get("markdown", "") for slide in slides),
+        frontmatter + "\n\n" + "\n\n---\n\n".join(slide.get("markdown", "") for slide in slides),
         "utf-8",
     )
+
+    def render_markdown(source: str) -> str:
+        lines = []
+        for raw in source.splitlines():
+            clean = html.escape(raw)
+            if clean.startswith("# "):
+                lines.append(f"<h1>{clean[2:]}</h1>")
+            elif clean.startswith("## "):
+                lines.append(f"<h2>{clean[3:]}</h2>")
+            elif clean.startswith("&gt; "):
+                lines.append(f"<blockquote>{clean[5:]}</blockquote>")
+            elif clean.strip():
+                lines.append(f"<p>{clean}</p>")
+        return "".join(lines)
+
     sections = "".join(
-        "<section>"
-        f"<h1>{html.escape(slide.get('title', ''))}</h1>"
-        f"<pre>{html.escape(slide.get('markdown', ''))}</pre>"
-        "</section>"
+        f"<section id='{html.escape(slide.get('slide_id', ''))}'>"
+        f"{render_markdown(slide.get('markdown', ''))}</section>"
         for slide in slides
     )
     page = (
@@ -62,8 +82,8 @@ def _write_slides(output: Path, slide_deck: dict) -> None:
         "body{font-family:sans-serif;background:#eef2f8;margin:0}"
         "section{box-sizing:border-box;width:100vw;height:100vh;"
         "padding:8vh 10vw;background:white;border-bottom:1px solid #ccd3df}"
-        "h1{font-size:5vw}"
-        "pre{font:2vw/1.6 sans-serif;white-space:pre-wrap}"
+        "h1{font-size:5vw}h2{font-size:3.5vw}"
+        "p,blockquote{font:2vw/1.6 sans-serif}blockquote{border-left:5px solid #49a;padding-left:2vw}"
         "@media print{section{page-break-after:always}}"
         "</style>"
         f"{sections}"
@@ -95,7 +115,22 @@ def create_export(job_id: str) -> None:
         output = tmp / "package"
         output.mkdir()
         (output / "README.txt").write_text(
-            "LessonDeck 备课导出包\n内容由教师最终确认后使用。",
+            "LessonDeck 备课导出包\nslides.md 为 Slidev 兼容源码；slides.html 可离线预览或打印为 PDF。\n内容由教师最终确认后使用。",
+            "utf-8",
+        )
+        (output / "版本清单.json").write_text(
+            json.dumps(
+                {
+                    artifact_type: {
+                        "version_id": version.id,
+                        "version_no": version.version_no,
+                        "change_type": version.change_type,
+                    }
+                    for artifact_type, version in versions.items()
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
             "utf-8",
         )
 
@@ -113,7 +148,11 @@ def create_export(job_id: str) -> None:
                     json.dumps(latest[artifact_type], ensure_ascii=False, indent=2),
                     "utf-8",
                 )
-            citations = [version.citations for version in versions.values() if version.citations]
+            citations = [
+                citation
+                for version in versions.values()
+                for citation in (version.citations or [])
+            ]
             (output / "引用清单.json").write_text(
                 json.dumps(citations, ensure_ascii=False, indent=2),
                 "utf-8",

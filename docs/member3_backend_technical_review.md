@@ -83,6 +83,7 @@ backend/app/
 - `backend/app/core/database.py`
 - `backend/app/models/entities.py`
 - `backend/migrations/versions/0001_initial.py`
+- `backend/migrations/versions/0002_task_result_snapshot.py`
 
 数据库选型为 MySQL 8，原因：
 
@@ -183,7 +184,7 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 任务模型 `AITask` 记录：
 
-- `status`：queued/running/succeeded/failed/canceled
+- `status`：pending/running/succeeded/failed/cancelled
 - `stage`：资料准备、生成、保存等阶段
 - `progress`：0 到 100
 - `trace_id`：端到端排查标识
@@ -206,9 +207,9 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 四类产物：
 
 - lesson_plan：教案
-- slides_outline：课件大纲
-- exercises：练习题
-- lecture_notes：讲稿
+- slide_deck：课件
+- exercise_set：练习题
+- speaker_notes：讲稿
 
 版本设计：
 

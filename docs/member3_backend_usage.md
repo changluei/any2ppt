@@ -1,6 +1,6 @@
 # 成员 3 后端使用说明与接口文档
 
-更新日期：2026-07-21  
+更新日期：2026-07-23
 适用范围：`backend/app/` 非 `ai/` 目录、`backend/migrations/`、`backend/tests/`、部署与后端验收脚本。
 
 本文档按《面向智慧教育的 AI 备课辅助系统_四人8天分工与 Codex 提示词》成员 3 每日任务维护。每完成一天验收，就同步更新“每日验收记录”。
@@ -11,10 +11,10 @@
 
 - FastAPI 分层工程：`main.py`、`api/routes/`、`core/`、`models/`、`schemas/`、`services/`、`repositories/`。
 - MySQL 8 持久化：项目、资料、任务、产物版本、图状态、导出任务均落库。
-- Alembic 正式迁移：当前 head 为 `0001_initial`，启动时不使用 `create_all` 代替迁移。
+- Alembic 正式迁移：当前 head 为 `0002_task_result_snapshot`，启动时不使用 `create_all` 代替迁移。
 - 文件上传与资料索引：支持 PDF、DOCX、TXT、Markdown，文件落本地目录，MySQL 只存元数据。
 - 任务与产物闭环：创建任务、幂等、轮询、保存四类产物、局部修改、版本冲突、回滚。
-- 图状态与导出：GraphRun 持久化，支持查询、取消、恢复、人工确认；支持教师包和学生包导出。
+- 图状态与导出：生产任务实际调用 LangGraph，GraphRun 保存节点、轮次与检查点；支持查询、取消、恢复、定向返修、人工确认和按版本双包导出。
 - 统一错误与追踪：响应头和错误体带 `trace_id`，错误码可供前端展示。
 
 ## 2. 本机 MySQL 配置
@@ -541,7 +541,7 @@ python -m pytest -q
 - 后端分层目录。
 - pydantic-settings 配置。
 - SQLAlchemy 2.x + PyMySQL + MySQL utf8mb4。
-- Alembic `0001_initial`。
+- Alembic head `0002_task_result_snapshot`（基础表为 `0001_initial`）。
 - `Project` 模型和基础项目接口。
 - `/health` 和 `/health/db`。
 - CORS 开发配置。

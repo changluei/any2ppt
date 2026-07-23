@@ -53,6 +53,16 @@ async function resume() {
   finally { busy.value = false }
 }
 
+async function cancelRun() {
+  if (!graph.value.id || busy.value) return
+  busy.value = true
+  try {
+    graph.value = await api.cancelGraph(graph.value.id)
+    ElMessage.success('流程已取消，可稍后从检查点恢复')
+  } catch (requestError) { error.value = requestError as ApiError }
+  finally { busy.value = false }
+}
+
 function locate(issue: QualityIssue) {
   router.push(issueTargetRoute(projectId, issue.target_id))
 }
@@ -77,13 +87,14 @@ onUnmounted(() => clearTimeout(timer))
     <AppError v-else-if="error && !graph.id" :error="error.message" @retry="load" />
     <div v-else class="panel panel-pad">
       <el-alert v-if="error" type="error" :closable="false" :title="error.message"><template #default><el-button link type="danger" @click="load">重试</el-button></template></el-alert>
-      <div class="flow-head"><div><h3>流程状态 <StatusTag :status="graph.status" /></h3><p class="meta">总尝试 {{ graph.attempt || 0 }} 次 · 已用 {{ elapsedText(graph.created_at, graph.updated_at) }}</p></div><el-button v-if="graph.thread_id" text @click="copyThread">复制 thread_id</el-button></div>
+      <div class="flow-head"><div><h3>流程状态 <StatusTag :status="graph.status" /></h3><p class="meta">总尝试 {{ graph.attempt || 0 }} 次 · 已用 {{ elapsedText(graph.created_at, graph.updated_at) }}</p></div><div><el-button v-if="graph.status === 'running'" text type="warning" :loading="busy" @click="cancelRun">取消流程</el-button><el-button v-if="graph.thread_id" text @click="copyThread">复制 thread_id</el-button></div></div>
       <div v-if="graph.nodes.length" class="node-flow">
         <template v-for="(node,index) in graph.nodes" :key="node.node_id"><button :class="['node',node.status,{current:node.node_id === graph.current_node}]" type="button"><b>{{ labels[node.node_id] || node.node_id }}</b><small><StatusTag :status="node.status" /> · 尝试 {{ node.attempt }}</small></button><span v-if="index < graph.nodes.length - 1">→</span></template>
       </div>
       <el-empty v-else description="尚未运行完整生成任务" />
 
       <el-alert v-if="current" class="section-gap" :closable="false" :title="`当前节点：${labels[current.node_id] || current.node_id}；已尝试 ${current.attempt} 次`" type="info" />
+      <el-alert v-if="graph.state_snapshot?.recovery_message || graph.state_snapshot?.error" class="section-gap" :closable="false" type="warning" :title="graph.state_snapshot.recovery_message || graph.state_snapshot.error" />
       <el-alert v-if="graph.status === 'needs_revision'" class="section-gap" :closable="false" type="warning" :title="`仅返修：${graph.state_snapshot?.repair_scope || '问题对应内容'}，已通过部分不会全部重做。`" />
       <el-alert v-if="(graph.attempt || 0) > 2" class="section-gap" :closable="false" type="error" title="自动尝试次数较多，请转为人工处理。" />
 

@@ -30,3 +30,4 @@ backend/data/chroma/*/
 .idea/
 .vscode/
 归档/
+*.docx

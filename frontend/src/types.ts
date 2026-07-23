@@ -53,6 +53,15 @@ export type Task = {
   stage: string
   progress: number
   trace_id: string
+  result_snapshot?: {
+    skill_id?: string
+    result?: Record<string, unknown>
+    citations?: Citation[]
+    warnings?: string[]
+    degraded?: boolean
+    trace?: Record<string, unknown>
+    kind?: string
+  }
   result_artifact_id?: string
   error_code?: string
   error_message?: string
@@ -131,6 +140,10 @@ export type Artifact = {
   project_id: string
   type: ArtifactType
   version_no: number
+  parent_version_id?: string
+  change_type: string
+  changed_ids: string[]
+  unchanged_hashes: Array<{ id: string; sha256: string }>
   content: ArtifactContent
   citations: Citation[]
   warnings: string[]
@@ -148,7 +161,15 @@ export type GraphState = {
   current_node?: string | null
   nodes: Array<{ node_id: string; status: string; attempt: number; started_at?: string; finished_at?: string; issues?: string[] }>
   issues: QualityIssue[]
-  state_snapshot?: { repair_scope?: string; degraded?: boolean; model?: string }
+  state_snapshot?: {
+    repair_scope?: string
+    degraded?: boolean
+    model?: string
+    elapsed_ms?: number
+    recovery_message?: string
+    error?: string
+    checkpointed_at?: string
+  }
   human_decision?: string
   created_at?: string
   updated_at?: string

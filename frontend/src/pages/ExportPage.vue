@@ -94,7 +94,7 @@ onUnmounted(() => clearTimeout(timer))
       </div>
 
       <h3>选择产物版本</h3>
-      <div v-for="type in requiredTypes" :key="type" class="version-select"><span>{{ labels[type] }}</span><el-select v-model="selected[type]" placeholder="请选择版本"><el-option v-for="item in versions[type] || []" :key="item.version_id" :label="`v${item.version_no} · ${new Date(item.created_at).toLocaleString()}`" :value="item.version_id" /></el-select></div>
+      <div v-for="type in requiredTypes" :key="type" class="version-select"><span>{{ labels[type] }}</span><el-select v-model="selected[type]" placeholder="请选择版本"><el-option v-for="item in versions[type] || []" :key="item.version_id" :label="`v${item.version_no} · ${item.change_type} · ${new Date(item.created_at).toLocaleString()}`" :value="item.version_id" /></el-select></div>
       <div class="version-select"><span>导出格式</span><el-input model-value="ZIP" disabled /></div>
       <el-alert v-if="kind === 'student'" type="success" :closable="false" title="学生包预览：已隐藏逐页讲稿、答案和解析。" />
       <el-alert v-if="error" type="error" :closable="false" :title="error.message" />

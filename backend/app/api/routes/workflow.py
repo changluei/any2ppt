@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.models import AITask, ArtifactVersion, ExportJob, GraphRun, LessonArtifact, Project
 from app.schemas.api import ExportCreate, GraphRunOut, GraphStartRequest, HumanDecision
 from app.services.export_service import create_export
+from app.services.graph_service import execute_graph_run, finalize_graph, repair_graph_run
 
 router = APIRouter(prefix="/api", tags=["workflow"])
 
@@ -103,7 +104,7 @@ def graph_or_404(db: Session, graph_id: str) -> GraphRun:
 
 
 @router.post("/projects/{project_id}/graph/runs", response_model=GraphRunOut, status_code=202)
-def start_graph(project_id: str, data: GraphStartRequest, db: Session = Depends(get_db)):
+def start_graph(project_id: str, data: GraphStartRequest, background: BackgroundTasks, db: Session = Depends(get_db)):
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(404, detail={"code": "PROJECT_NOT_FOUND", "message": "项目不存在"})
@@ -131,6 +132,7 @@ def start_graph(project_id: str, data: GraphStartRequest, db: Session = Depends(
     db.add(graph)
     db.commit()
     db.refresh(graph)
+    background.add_task(execute_graph_run, graph.id)
     return graph_payload(graph)
 
 
@@ -158,7 +160,7 @@ def cancel_graph(graph_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/graphs/{graph_id}/resume", response_model=GraphRunOut)
-def resume_graph(graph_id: str, db: Session = Depends(get_db)):
+def resume_graph(graph_id: str, background: BackgroundTasks, db: Session = Depends(get_db)):
     graph = graph_or_404(db, graph_id)
     if graph.status not in {"cancelled", "failed", "needs_revision", "awaiting_confirmation"}:
         raise HTTPException(409, detail={"code": "GRAPH_CONFLICT", "message": "当前流程不需要恢复"})
@@ -167,25 +169,26 @@ def resume_graph(graph_id: str, db: Session = Depends(get_db)):
     graph.current_node = graph.current_node or "analyze_sources"
     db.commit()
     db.refresh(graph)
+    background.add_task(execute_graph_run, graph.id)
     return graph_payload(graph)
 
 
 @router.post("/graphs/{graph_id}/confirm")
-def confirm_graph(graph_id: str, data: HumanDecision, db: Session = Depends(get_db)):
+def confirm_graph(graph_id: str, data: HumanDecision, background: BackgroundTasks, db: Session = Depends(get_db)):
     graph = graph_or_404(db, graph_id)
-    if graph.human_decision == data.decision:
+    if graph.human_decision == data.decision and data.decision != "revise":
         return {"status": graph.status, "decision": graph.human_decision}
-    graph.human_decision = data.decision
-    if data.decision == "accept":
-        graph.status = "succeeded"
-        graph.current_node = "finalize"
-    elif data.decision == "cancel":
-        graph.status = "cancelled"
-        graph.current_node = "cancelled"
+    if data.decision == "revise":
+        graph.human_decision = data.decision
+        graph.status = "running"
+        graph.current_node = (graph.state_snapshot or {}).get("repair_scope") or "review_quality"
+        db.commit()
+        background.add_task(repair_graph_run, graph.id)
     else:
-        graph.status = "needs_revision"
-        graph.current_node = "review_quality"
-    db.commit()
+        graph_id_value = graph.id
+        db.close()
+        changed = finalize_graph(graph_id_value, data.decision)
+        return {"status": changed.status, "decision": changed.human_decision}
     return {"status": graph.status, "decision": graph.human_decision}
 
 

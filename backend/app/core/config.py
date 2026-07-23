@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from functools import lru_cache
 from pathlib import Path
 
@@ -19,6 +21,7 @@ class Settings(BaseSettings):
     mysql_password: str = "change_me"
     database_url_override: str | None = Field(default=None, validation_alias="DATABASE_URL")
     deepseek_api_key: str = ""
+    ai_force_fallback: bool = False
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-chat"
     ai_timeout_seconds: int = 60
@@ -66,4 +69,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

@@ -12,26 +12,47 @@
     },
     "Task": {
       "type": "object",
-      "required": ["task_id", "type", "status", "stage", "progress", "trace_id"],
+      "required": ["id", "project_id", "type", "status", "stage", "progress", "trace_id"],
       "properties": {
-        "task_id": {"type": "string"}, "type": {"type": "string"},
+        "id": {"type": "string"}, "project_id": {"type": "string"}, "type": {"type": "string"},
         "status": {"enum": ["pending", "running", "succeeded", "failed", "cancelled"]},
         "stage": {"type": "string"}, "progress": {"type": "integer", "minimum": 0, "maximum": 100},
         "trace_id": {"type": "string"}, "error_code": {"type": ["string", "null"]},
-        "error_message": {"type": ["string", "null"]}
+        "error_message": {"type": ["string", "null"]}, "result_snapshot": {"type": ["object", "null"]}
       }
     },
     "Artifact": {
       "type": "object",
-      "required": ["artifact_id", "project_id", "type", "version_no", "content", "citations", "warnings"],
+      "required": ["artifact_id", "version_id", "project_id", "type", "version_no", "change_type", "changed_ids", "unchanged_hashes", "content", "citations", "warnings"],
       "properties": {
-        "artifact_id": {"type": "string"}, "project_id": {"type": "string"},
+        "artifact_id": {"type": "string"}, "version_id": {"type": "string"}, "project_id": {"type": "string"},
         "type": {"enum": ["lesson_plan", "slide_deck", "speaker_notes", "exercise_set"]},
-        "version_no": {"type": "integer", "minimum": 1}, "content": {},
+        "version_no": {"type": "integer", "minimum": 1}, "change_type": {"type": "string"},
+        "changed_ids": {"type": "array", "items": {"type": "string"}},
+        "unchanged_hashes": {"type": "array", "items": {"type": "object"}},
+        "content": {},
         "citations": {"type": "array", "items": {"$ref": "#/$defs/Citation"}},
         "warnings": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "SkillResponse": {
+      "type": "object",
+      "required": ["skill_id", "result", "citations", "warnings", "trace", "degraded"],
+      "properties": {
+        "skill_id": {"type": "string"}, "result": {"type": "object"},
+        "citations": {"type": "array", "items": {"$ref": "#/$defs/Citation"}},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+        "trace": {"type": "object"}, "degraded": {"type": "boolean"}
+      }
+    },
+    "GraphRun": {
+      "type": "object",
+      "required": ["id", "project_id", "task_id", "status", "current_node", "nodes", "issues"],
+      "properties": {
+        "id": {"type": "string"}, "project_id": {"type": "string"}, "task_id": {"type": "string"},
+        "status": {"type": "string"}, "current_node": {"type": "string"},
+        "nodes": {"type": "array"}, "issues": {"type": "array"}
       }
     }
   }
 }
-

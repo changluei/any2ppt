@@ -10,8 +10,10 @@ from app.models import AITask, LessonArtifact, Project
 from app.repositories.projects import get_project, list_projects, project_delete_blockers, ready_source_ids
 from app.schemas.api import ArtifactOut, ProjectCreate, ProjectOut, TaskCreate, TaskOut
 from app.services.artifact_service import artifact_out, run_generation_task
+from app.ai.skills import SKILLS
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
+VALID_TASK_TYPES = {"full_lesson", *(item.id for item in SKILLS)}
 
 
 @router.get("", response_model=list[ProjectOut])
@@ -68,6 +70,8 @@ def create_task(project_id: str, data: TaskCreate, request: Request, background:
     project = get_project(db, project_id)
     if not project:
         raise HTTPException(404, detail={"code": "PROJECT_NOT_FOUND", "message": "项目不存在"})
+    if data.type not in VALID_TASK_TYPES:
+        raise HTTPException(400, detail={"code": "UNKNOWN_TASK_TYPE", "message": "未知的生成任务类型"})
     requested_sources = list(data.selected_source_ids)
     if requested_sources:
         ready = set(ready_source_ids(db, project_id, requested_sources))

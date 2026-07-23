@@ -1,4 +1,5 @@
 import uuid
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -11,12 +12,22 @@ from app.ai.vector_store import ProjectVectorStore
 from app.api.routes import artifacts, projects, sources, tasks, workflow
 from app.core.config import get_settings
 from app.core.database import SessionLocal
+from app.services.recovery_service import recover_interrupted_work
 
 settings = get_settings()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    recover_interrupted_work()
+    yield
+
+
 app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
     description="小学单课时 AI 备课、可追溯 RAG、版本化产物与双包导出服务。",
+    lifespan=lifespan,
 )
 app.add_middleware(
     CORSMiddleware,
@@ -106,11 +117,12 @@ def health_db():
 
 @app.get("/health/ai")
 def health_ai():
-    configured = bool(settings.deepseek_api_key.strip())
+    configured = bool(settings.deepseek_api_key.strip()) and not settings.ai_force_fallback
     return {
         "status": "ok" if configured else "degraded",
         "provider": "deepseek",
         "configured": configured,
+        "forced_fallback": settings.ai_force_fallback,
         "model": settings.deepseek_model,
     }
 
@@ -135,4 +147,3 @@ app.include_router(sources.router)
 app.include_router(tasks.router)
 app.include_router(artifacts.router)
 app.include_router(workflow.router)
-

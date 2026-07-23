@@ -387,7 +387,7 @@ def static_checks() -> list[CheckResult]:
         pytest_code, pytest_output = run_command([sys.executable, "-m", "pytest", "-q"], timeout=120)
         assert pytest_code == 0, pytest_output
         alembic_code, alembic_output = run_command([sys.executable, "-m", "alembic", "-c", "alembic.ini", "current"], cwd=BACKEND)
-        assert alembic_code == 0 and "0001_initial" in alembic_output, alembic_output
+        assert alembic_code == 0 and "0002_task_result_snapshot" in alembic_output, alembic_output
         docker = docker_command()
         assert docker, "未找到 docker 命令"
         compose_code, compose_output = run_command([docker, "compose", "-f", "deploy/docker-compose.yml", "config"], timeout=60)

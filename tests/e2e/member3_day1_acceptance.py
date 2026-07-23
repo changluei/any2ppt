@@ -204,9 +204,9 @@ def check_alembic_head() -> CheckResult:
     code, output = run_command([sys.executable, "-m", "alembic", "-c", "alembic.ini", "heads"], cwd=BACKEND)
     return result(
         "Alembic 迁移",
-        code == 0 and "0001_initial" in output,
+        code == 0 and "0002_task_result_snapshot" in output,
         output,
-        output or "未识别到 0001_initial head",
+        output or "未识别到 0002_task_result_snapshot head",
     )
 
 
@@ -289,13 +289,13 @@ def check_real_mysql() -> CheckResult:
     )
     ok = (
         alembic_code == 0
-        and "0001_initial" in alembic_output
+        and "0002_task_result_snapshot" in alembic_output
         and health_code == 0
         and "'status': 'ok'" in health_output
         and "'database': 'mysql'" in health_output
     )
     if ok:
-        return CheckResult("真实 MySQL 8 迁移与 /health/db", "通过", "Alembic 当前版本为 0001_initial，/health/db 返回 mysql ok")
+        return CheckResult("真实 MySQL 8 迁移与 /health/db", "通过", "Alembic 当前版本为 0002_task_result_snapshot，/health/db 返回 mysql ok")
     return CheckResult(
         "真实 MySQL 8 迁移与 /health/db",
         "未验证",

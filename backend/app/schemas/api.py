@@ -68,6 +68,7 @@ class TaskOut(ORMModel):
     stage: str
     progress: int
     trace_id: str
+    result_snapshot: Optional[dict[str, Any]]
     result_artifact_id: Optional[str]
     error_code: Optional[str]
     error_message: Optional[str]
@@ -83,6 +84,10 @@ class ArtifactOut(BaseModel):
     project_id: str
     type: str
     version_no: int
+    parent_version_id: Optional[str]
+    change_type: str
+    changed_ids: list[str]
+    unchanged_hashes: list[dict[str, str]]
     content: dict[str, Any]
     citations: list[dict[str, Any]]
     warnings: list[str]

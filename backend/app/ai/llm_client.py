@@ -59,7 +59,7 @@ class DeepSeekClient:
 
     @property
     def configured(self) -> bool:
-        return bool(self.settings.deepseek_api_key)
+        return bool(self.settings.deepseek_api_key) and not getattr(self.settings, "ai_force_fallback", False)
 
     def _client(self):
         if not self.configured:

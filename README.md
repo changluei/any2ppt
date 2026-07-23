@@ -18,17 +18,17 @@
 2. 执行：
 
 ```bash
-docker compose -f deploy/docker-compose.yml up --build
+docker compose --env-file .env -f deploy/docker-compose.yml up --build
 ```
 
 3. 打开前端 <http://localhost:5173>，Swagger 为 <http://localhost:8000/docs>，API/数据库诊断为 `/health` 和 `/health/db`。
 
-没有模型密钥时，系统会生成基于用户输入的“规则降级草案”，界面有醒目标识，绝不会冒充 DeepSeek 成功。上传 `samples/公开课例资料.md` 后可查看真实来源位置。
+没有模型密钥时，系统会生成基于用户输入的“规则降级草案”，界面有醒目标识，绝不会冒充 DeepSeek 成功。上传 `samples/公开课例资料.md` 后可查看真实来源位置。需要在已配置密钥的环境中做无费用验收时，设置 `AI_FORCE_FALLBACK=true`。
 
 停止服务（保留 MySQL 与 Chroma 数据）：
 
 ```bash
-docker compose -f deploy/docker-compose.yml down
+docker compose --env-file .env -f deploy/docker-compose.yml down
 ```
 
 ## 本地开发
@@ -39,7 +39,7 @@ docker compose -f deploy/docker-compose.yml down
 cd backend
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements/base.txt -r requirements/ai.txt
+pip install -r requirements/base.txt -r requirements/ai.txt -r requirements/dev.txt
 alembic upgrade head
 uvicorn app.main:app --reload
 ```
@@ -55,7 +55,7 @@ pnpm dev
 
 Windows PowerShell 将复制命令改为 `Copy-Item .env.example .env`。演示课题按钮只填课程输入，不包含任何预生成的 AI 结果。
 
-验证：`pnpm typecheck && pnpm test && pnpm build`、`pytest backend/tests tests/contract`、`python tests/e2e/smoke.py`。
+验证：`pnpm lint && pnpm typecheck && pnpm test && pnpm build`、`pytest backend/tests tests/contract`、`python tests/e2e/smoke.py`。发布前按 [发布验收清单](docs/release_acceptance.md) 执行。
 
 ## Windows PowerShell
 
@@ -73,17 +73,16 @@ cd ..
 
 ```powershell
 Copy-Item .env.example .env
-docker compose -f deploy/docker-compose.yml config
-docker compose -f deploy/docker-compose.yml up --build
-docker compose -f deploy/docker-compose.yml ps
-docker compose -f deploy/docker-compose.yml logs --tail 100 backend
-docker compose -f deploy/docker-compose.yml restart backend
-docker compose -f deploy/docker-compose.yml down
+docker compose --env-file .env -f deploy/docker-compose.yml config
+docker compose --env-file .env -f deploy/docker-compose.yml up --build
+docker compose --env-file .env -f deploy/docker-compose.yml ps
+docker compose --env-file .env -f deploy/docker-compose.yml logs --tail 100 backend
+docker compose --env-file .env -f deploy/docker-compose.yml restart backend
+docker compose --env-file .env -f deploy/docker-compose.yml down
 ```
 
 不使用 `down -v`，因此停止服务不会删除数据库卷。密钥、上传文件、导出包、MySQL 和检索持久化目录均已从 Git 排除。
 
 ## 当前边界
 
-首版聚焦小学单课时，不提供复杂权限、在线协作、拖拽式 PPT 编辑或扫描 PDF OCR。Slidev 以安全 Markdown 预览和源码导出为主，HTML/PDF 可在后续接入独立渲染容器。
-
+首版聚焦小学单课时，不提供复杂权限、在线协作、拖拽式 PPT 编辑或扫描 PDF OCR。课件采用 Slidev 兼容 Markdown、安全 iframe 预览和离线 HTML 导出；PDF 可由导出的 HTML 通过浏览器打印生成。

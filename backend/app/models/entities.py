@@ -78,6 +78,7 @@ class AITask(Base, TimestampMixin):
     trace_id: Mapped[str] = mapped_column(String(36), index=True, nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(100), nullable=False)
     input_snapshot: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    result_snapshot: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     result_artifact_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     error_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

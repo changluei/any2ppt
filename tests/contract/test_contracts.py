@@ -5,7 +5,7 @@ import jsonschema
 
 def test_task_contract_accepts_only_frozen_statuses():
     schema = json.loads(Path("contracts/schemas.json").read_text("utf-8"))
-    task = {"task_id": "t1", "type": "full_lesson", "status": "running", "stage": "生成", "progress": 50, "trace_id": "trace"}
+    task = {"id": "t1", "project_id": "p1", "type": "full_lesson", "status": "running", "stage": "生成", "progress": 50, "trace_id": "trace"}
     jsonschema.validate(task, schema["$defs"]["Task"])
     task["status"] = "done"
     try:
@@ -13,4 +13,3 @@ def test_task_contract_accepts_only_frozen_statuses():
     except jsonschema.ValidationError:
         return
     raise AssertionError("非法状态必须被契约拒绝")
-

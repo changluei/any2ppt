@@ -8,7 +8,8 @@ import type { ApiError, Artifact, ArtifactType, Citation, Project, Skill, Source
 import AppError from '../components/AppError.vue'
 import AppLoading from '../components/AppLoading.vue'
 import StatusTag from '../components/StatusTag.vue'
-import { canRetryTask, citationAvailable, currentTaskId, groupExercises, safeSlideHtml, shouldPoll, showExerciseAnswers, taskErrorText, totalMinutes } from '../utils/workbench'
+import SlidevPreview from '../components/SlidevPreview.vue'
+import { canRetryTask, citationAvailable, currentTaskId, groupExercises, shouldPoll, showExerciseAnswers, taskErrorText, totalMinutes } from '../utils/workbench'
 
 const route = useRoute()
 const router = useRouter()
@@ -49,7 +50,6 @@ const visibleDeck = computed(() => activeType.value === 'slide_deck' ? artifact.
 const selected = computed(() => visibleDeck.value?.content.slides?.find(({ slide_id }) => slide_id === selectedSlide.value))
 const selectedNote = computed(() => notes.value?.content.notes?.find(({ slide_id }) => slide_id === selectedSlide.value))
 const exerciseGroups = computed(() => groupExercises(artifact.value?.content.exercises))
-const previewHtml = computed(() => safeSlideHtml(draftMarkdown.value))
 const inputNames: Record<string, string> = {
   lesson_topic: '课题', grade: '年级', student_profile: '学情', lesson_count: '课时数',
 }
@@ -170,7 +170,7 @@ async function reviseArtifact(instruction = revision.value) {
       base_version_no: artifact.value.version_no, target_type: targetType, target_id: targetId,
       instruction: instruction.trim(), sync_related: sync.value,
     })
-    changedIds.value = targetId ? [targetId] : []
+    changedIds.value = changed.changed_ids
     artifacts.value = sync.value && activeType.value === 'slide_deck'
       ? await api.artifacts(projectId)
       : artifacts.value.map((item) => item.artifact_id === changed.artifact_id ? changed : item)
@@ -267,6 +267,12 @@ watch(selected, (value) => { draftMarkdown.value = value?.markdown || '' }, { im
           <el-button v-if="['pending','running'].includes(task.status)" link :disabled="!!busy" @click="changeTask(task, 'cancel')">取消</el-button>
           <el-button v-if="canRetryTask(task)" link :disabled="!!busy" @click="changeTask(task, 'retry')">重试</el-button>
           <el-button v-if="task.trace_id" link @click="copyTrace(task.trace_id)">复制 trace_id</el-button>
+          <el-collapse v-if="task.result_snapshot?.skill_id" class="skill-result">
+            <el-collapse-item :title="`${task.result_snapshot.skill_id} 独立结果`">
+              <el-tag v-if="task.result_snapshot.degraded" type="warning">规则降级草案</el-tag>
+              <pre>{{ JSON.stringify(task.result_snapshot.result, null, 2) }}</pre>
+            </el-collapse-item>
+          </el-collapse>
         </div>
       </aside>
 
@@ -290,7 +296,7 @@ watch(selected, (value) => { draftMarkdown.value = value?.markdown || '' }, { im
           <template v-else-if="activeType === 'slide_deck'">
             <div class="row"><div class="slide-list"><div v-for="item in artifact.content.slides || []" :key="item.slide_id" :class="['slide-thumb',{active:selectedSlide === item.slide_id}]" @click="selectedSlide = item.slide_id"><b>{{ item.order }}. {{ item.title }}</b><br>{{ item.teaching_stage }}</div></div>
               <div class="grow"><el-segmented v-model="slideMode" :options="['预览','Markdown源码']" />
-                <iframe v-if="slideMode === '预览'" class="slide-frame" sandbox="" title="课件安全预览" :srcdoc="previewHtml" />
+                <SlidevPreview v-if="slideMode === '预览'" :title="selected?.title" :markdown="draftMarkdown" />
                 <div v-else><el-input v-model="draftMarkdown" type="textarea" :rows="15" maxlength="6000" /><el-button type="primary" plain :disabled="!!busy" @click="saveMarkdown">提交源码修改</el-button></div>
                 <div class="source-line"><el-button v-for="item in selected?.citations || []" :key="item.chunk_id" link @click="showCitation(item)">来源：{{ item.filename }}</el-button><el-tag v-if="!selected?.citations?.length" type="info">AI建议 · 无独立来源</el-tag></div>
                 <div v-if="selectedNote" class="notes-card"><b>同步讲稿 · {{ selectedNote.estimated_minutes || 0 }} 分钟</b><p>{{ selectedNote.explanation }}</p><p>提问：{{ selectedNote.questions.join('；') }}</p><p>板书：{{ selectedNote.board_notes }}</p><span class="meta">过渡：{{ selectedNote.transition }}</span></div></div></div>
@@ -333,5 +339,5 @@ watch(selected, (value) => { draftMarkdown.value = value?.markdown || '' }, { im
 </template>
 
 <style scoped>
-.action-error{margin-bottom:12px}.source-options{display:grid;gap:6px}.source-options .el-checkbox{max-width:100%;height:auto;white-space:normal;overflow-wrap:anywhere}.skill-card small{display:block;color:#7a8599;margin:6px 0}.task-row{padding:10px;border-bottom:1px solid #edf0f5}.task-row.focused{background:#f3f7ff}.task-error{color:#d84c4c;font-size:13px;overflow-wrap:anywhere}.citation,.citation b,.citation small{overflow-wrap:anywhere}.citation small{display:block;margin-top:4px}.artifact-area h3{margin-top:22px}.section-title{display:flex;align-items:center;justify-content:space-between}.point-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.point-grid>div{padding:0 14px;background:#f7f9fc;border-radius:10px}.slide-frame{width:100%;height:420px;border:0;border-radius:12px}.source-line{margin-top:8px}.version-row{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #edf0f5}blockquote{line-height:1.7;overflow-wrap:anywhere}
+.action-error{margin-bottom:12px}.source-options{display:grid;gap:6px}.source-options .el-checkbox{max-width:100%;height:auto;white-space:normal;overflow-wrap:anywhere}.skill-card small{display:block;color:#7a8599;margin:6px 0}.task-row{padding:10px;border-bottom:1px solid #edf0f5}.task-row.focused{background:#f3f7ff}.task-error{color:#d84c4c;font-size:13px;overflow-wrap:anywhere}.skill-result{margin-top:8px}.skill-result pre{max-height:260px;overflow:auto;white-space:pre-wrap;font-size:11px}.citation,.citation b,.citation small{overflow-wrap:anywhere}.citation small{display:block;margin-top:4px}.artifact-area h3{margin-top:22px}.section-title{display:flex;align-items:center;justify-content:space-between}.point-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.point-grid>div{padding:0 14px;background:#f7f9fc;border-radius:10px}.source-line{margin-top:8px}.version-row{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #edf0f5}blockquote{line-height:1.7;overflow-wrap:anywhere}
 </style>

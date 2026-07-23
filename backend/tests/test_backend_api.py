@@ -181,3 +181,98 @@ def test_source_task_graph_and_export_flow(client):
     archive = zipfile.ZipFile(io.BytesIO(download.content))
     assert "README.txt" in archive.namelist()
     assert any(name.endswith(".json") for name in archive.namelist())
+    assert "slides.md" in archive.namelist()
+    assert archive.read("slides.md").decode("utf-8").startswith("---\ntheme:")
+    assert "版本清单.json" in archive.namelist()
+
+
+def test_independent_skill_result_and_unknown_type(client):
+    project = create_project(client)
+    response = client.post(
+        f"/api/projects/{project['id']}/tasks",
+        json={
+            "type": "learning_objectives",
+            "selected_source_ids": [],
+            "teacher_requirements": "突出可观察行为",
+            "idempotency_key": "independent-skill",
+        },
+    )
+    assert response.status_code == 202, response.text
+    task = wait_for_task(client, response.json()["id"])
+    assert task["status"] == "succeeded"
+    assert task["result_artifact_id"] is None
+    assert task["result_snapshot"]["skill_id"] == "learning_objectives"
+    assert task["result_snapshot"]["result"]["objectives"]
+    assert client.get(f"/api/projects/{project['id']}/artifacts").json() == []
+
+    unknown = client.post(
+        f"/api/projects/{project['id']}/tasks",
+        json={
+            "type": "not-a-real-skill",
+            "selected_source_ids": [],
+            "teacher_requirements": "",
+            "idempotency_key": "unknown-skill",
+        },
+    )
+    assert unknown.status_code == 400
+    assert unknown.json()["error"]["code"] == "UNKNOWN_TASK_TYPE"
+
+
+def test_version_metadata_rollback_and_student_privacy(client):
+    project = create_project(client)
+    response = client.post(
+        f"/api/projects/{project['id']}/tasks",
+        json={
+            "type": "full_lesson",
+            "selected_source_ids": [],
+            "teacher_requirements": "",
+            "idempotency_key": "version-flow",
+        },
+    )
+    task = wait_for_task(client, response.json()["id"])
+    assert task["status"] == "succeeded"
+    artifacts = client.get(f"/api/projects/{project['id']}/artifacts").json()
+    slide_deck = next(item for item in artifacts if item["type"] == "slide_deck")
+    target = slide_deck["content"]["slides"][0]["slide_id"]
+    changed = client.post(
+        f"/api/artifacts/{slide_deck['artifact_id']}/revise",
+        json={
+            "base_version_no": 1,
+            "target_type": "slide",
+            "target_id": target,
+            "instruction": "精简页面文字",
+            "sync_related": True,
+        },
+    )
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["changed_ids"] == [target]
+    assert changed.json()["unchanged_hashes"]
+    rollback = client.post(f"/api/artifacts/{slide_deck['artifact_id']}/rollback/1")
+    assert rollback.status_code == 200
+    assert rollback.json()["change_type"] == "rollback"
+    assert rollback.json()["version_no"] == 3
+
+    graph = client.get(f"/api/projects/{project['id']}/graph").json()
+    client.post(f"/api/graphs/{graph['id']}/confirm", json={"decision": "accept"})
+    refreshed = client.get(f"/api/projects/{project['id']}/artifacts").json()
+    version_ids = [
+        item["version_id"]
+        for item in refreshed
+        if item["type"] in {"slide_deck", "exercise_set"}
+    ]
+    export = client.post(
+        f"/api/projects/{project['id']}/exports",
+        json={"package_type": "student", "artifact_version_ids": version_ids},
+    )
+    assert export.status_code == 202, export.text
+    job_id = export.json()["job_id"]
+    for _ in range(80):
+        status = client.get(f"/api/exports/{job_id}").json()
+        if status["status"] in {"succeeded", "failed"}:
+            break
+        time.sleep(0.05)
+    archive = zipfile.ZipFile(io.BytesIO(client.get(f"/api/exports/{job_id}/download").content))
+    assert "逐页讲稿.json" not in archive.namelist()
+    student = archive.read("学生练习.json").decode("utf-8")
+    assert '"answer"' not in student
+    assert '"explanation"' not in student
