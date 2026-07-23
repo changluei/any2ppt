@@ -40,6 +40,7 @@ export type Citation = {
   filename: string
   location: string
   quote: string
+  score?: number
 }
 
 export type Skill = { id: string; name: string; description: string; required_inputs: string[] }
@@ -67,34 +68,58 @@ export type TaskInput = {
   idempotency_key: string
 }
 
-export type Objective = { id: string; behavior: string; condition?: string; criterion?: string }
+export type Objective = { id: string; behavior: string; condition?: string; criterion?: string; core?: boolean }
 export type LessonStage = {
   id: string
   name: string
   time_minutes: number
   teacher_actions: string
   student_actions: string
+  objective_ids?: string[]
+  assessment?: string
 }
-export type Slide = { slide_id: string; order: number; title: string; markdown: string; teaching_stage: string }
+export type Assessment = { id: string; method: string; objective_ids: string[]; success_criteria: string }
+export type Slide = {
+  slide_id: string
+  order: number
+  title: string
+  layout?: string
+  markdown: string
+  teaching_stage: string
+  objective_ids?: string[]
+  citations?: Citation[]
+}
 export type SpeakerNote = {
   slide_id: string
   explanation: string
   questions: string[]
+  expected_answers?: string[]
   transition: string
   board_notes: string
+  estimated_minutes?: number
 }
 export type Exercise = {
   exercise_id: string
   level: string
+  objective_ids?: string[]
   question: string
+  type?: string
+  difficulty?: number
   answer: string
   explanation: string
+  source?: string
   needs_teacher_review: boolean
+  citations?: Citation[]
 }
 export type ArtifactContent = {
   title?: string
+  deck_title?: string
   objectives?: Objective[]
+  key_points?: string[]
+  difficult_points?: string[]
   stages?: LessonStage[]
+  assessments?: Assessment[]
+  teaching_strategies?: string[]
   slides?: Slide[]
   notes?: SpeakerNote[]
   exercises?: Exercise[]

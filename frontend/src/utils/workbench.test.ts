@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ProjectInput, Task } from '../types'
-import { canRetryTask, citationAvailable, currentTaskId, shouldPoll, taskErrorText, validateProject, workbenchPath } from './workbench'
+import { canRetryTask, citationAvailable, currentTaskId, groupExercises, safeSlideHtml, shouldPoll, showExerciseAnswers, taskErrorText, totalMinutes, validateProject, workbenchPath } from './workbench'
 
 const form: ProjectInput = {
   name: '测试项目', subject: '语文', grade: '三年级', textbook_version: '',
@@ -21,6 +21,24 @@ describe('day 3 workbench helpers', () => {
     const task = (status: Task['status']) => ({ status }) as Task
     expect(shouldPoll([task('running')])).toBe(true)
     expect(shouldPoll([task('succeeded'), task('failed')])).toBe(false)
+  })
+})
+
+describe('day 5 artifact helpers', () => {
+  it('sums lesson time and groups exercises', () => {
+    expect(totalMinutes([{ time_minutes: 5 }, { time_minutes: 35 }] as never)).toBe(40)
+    expect(groupExercises([{ level: '基础' }, { level: '提高' }] as never).map(({ items }) => items.length)).toEqual([1, 0, 1])
+  })
+
+  it('hides answers in student preview', () => {
+    expect(showExerciseAnswers('学生预览')).toBe(false)
+    expect(showExerciseAnswers('教师视图')).toBe(true)
+  })
+
+  it('escapes unsafe slide markup', () => {
+    const html = safeSlideHtml('<script>alert(1)</script>')
+    expect(html).not.toContain('<script>')
+    expect(html).toContain('&lt;script&gt;')
   })
 })
 
