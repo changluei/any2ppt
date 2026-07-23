@@ -46,6 +46,16 @@ function openProject(project: Project) {
   router.push(workbenchPath(project.id))
 }
 
+function fillDemo() {
+  Object.assign(form, {
+    name: '水的三态变化演示课', subject: '科学', grade: '小学三年级', textbook_version: '自编公开样例',
+    lesson_topic: '水的三态变化', lesson_count: 1, student_profile: '',
+    teacher_requirements: '单课时40分钟，突出观察、描述和安全提示。',
+  })
+  step.value = 0
+  dialog.value = true
+}
+
 function next() {
   const message = validateProject(form)
   if (message) return ElMessage.warning(message)
@@ -78,7 +88,10 @@ onMounted(load)
         <h2>备课项目</h2>
         <p>从课程信息开始，AI 会把资料、设计、课件与评价组织成同一条教学链。</p>
       </div>
-      <el-button type="primary" size="large" @click="dialog = true">＋ 开始备课</el-button>
+      <div class="row">
+        <el-button @click="fillDemo">填入演示课题</el-button>
+        <el-button type="primary" size="large" @click="dialog = true">＋ 开始备课</el-button>
+      </div>
     </div>
 
     <div :class="['panel', 'panel-pad', 'health-strip', app.backend]">
