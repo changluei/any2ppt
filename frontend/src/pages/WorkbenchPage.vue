@@ -8,7 +8,7 @@ import type { ApiError, Artifact, ArtifactType, Citation, Project, Skill, Source
 import AppError from '../components/AppError.vue'
 import AppLoading from '../components/AppLoading.vue'
 import StatusTag from '../components/StatusTag.vue'
-import { shouldPoll } from '../utils/workbench'
+import { canRetryTask, citationAvailable, currentTaskId, shouldPoll, taskErrorText } from '../utils/workbench'
 
 const route = useRoute()
 const router = useRouter()
@@ -35,6 +35,7 @@ let timer: number | undefined
 
 const readySources = computed(() => sources.value.filter(({ status }) => status === 'ready'))
 const running = computed(() => shouldPoll(tasks.value))
+const focusedTaskId = computed(() => currentTaskId(tasks.value, String(route.query.taskId || '')))
 const artifact = computed(() => artifacts.value.find(({ type }) => type === activeType.value))
 const deck = computed(() => artifacts.value.find(({ type }) => type === 'slide_deck'))
 const notes = computed(() => artifacts.value.find(({ type }) => type === 'speaker_notes'))
@@ -97,6 +98,7 @@ async function runSkill(type: string) {
       idempotency_key: `${type}-${crypto.randomUUID()}`,
     })
     tasks.value.unshift(task)
+    await router.replace({ query: { ...route.query, taskId: task.id } })
     ElMessage.success('任务已创建')
     schedulePolling()
   } catch (error) {
@@ -171,7 +173,8 @@ onUnmounted(stopPolling)
 
     <el-alert v-if="actionError" type="error" :closable="false" class="action-error">
       <template #title>
-        {{ actionError.message }}
+        {{ taskErrorText(actionError.code, actionError.message) }}
+        <el-tag v-if="actionError.code" type="danger" size="small">{{ actionError.code }}</el-tag>
         <el-button v-if="actionError.traceId" link type="danger" @click="copyTrace(actionError.traceId)">复制 trace_id</el-button>
       </template>
     </el-alert>
@@ -199,12 +202,12 @@ onUnmounted(stopPolling)
 
         <el-divider /><p class="eyebrow">最近任务</p>
         <div v-if="!tasks.length" class="muted">尚未发起任务</div>
-        <div v-for="task in tasks.slice(0, 5)" :key="task.id" class="task-row">
+        <div v-for="task in tasks.slice(0, 5)" :key="task.id" :class="['task-row',{focused:task.id === focusedTaskId}]">
           <div><StatusTag :status="task.status" /> <span class="meta">{{ task.stage }} · {{ task.progress }}%</span></div>
-          <el-progress v-if="task.status === 'running'" :percentage="task.progress" :show-text="false" />
-          <p v-if="task.error_message" class="task-error">{{ task.error_message }}</p>
+          <el-progress v-if="['pending','running'].includes(task.status)" :percentage="task.progress" :show-text="false" />
+          <p v-if="task.error_message || task.error_code" class="task-error">{{ taskErrorText(task.error_code, task.error_message) }}</p>
           <el-button v-if="['pending','running'].includes(task.status)" link :disabled="!!busy" @click="changeTask(task, 'cancel')">取消</el-button>
-          <el-button v-if="['failed','cancelled'].includes(task.status)" link :disabled="!!busy" @click="changeTask(task, 'retry')">重试</el-button>
+          <el-button v-if="canRetryTask(task)" link :disabled="!!busy" @click="changeTask(task, 'retry')">重试</el-button>
           <el-button v-if="task.trace_id" link @click="copyTrace(task.trace_id)">复制 trace_id</el-button>
         </div>
       </aside>
@@ -254,6 +257,7 @@ onUnmounted(stopPolling)
     </div>
 
     <el-drawer v-model="drawerVisible" title="资料原文" size="420px">
+      <el-alert v-if="selectedCitation && !citationAvailable(selectedCitation.source_id, sources.map(({id}) => id))" title="原资料已删除或不可用，以下为产物保存时的引用快照。" type="warning" :closable="false" />
       <el-descriptions v-if="selectedCitation" :column="1" border><el-descriptions-item label="文件">{{ selectedCitation.filename }}</el-descriptions-item><el-descriptions-item label="位置">{{ selectedCitation.location }}</el-descriptions-item><el-descriptions-item label="分块">{{ selectedCitation.chunk_id }}</el-descriptions-item></el-descriptions>
       <blockquote v-if="selectedCitation">{{ selectedCitation.quote }}</blockquote>
     </el-drawer>
@@ -261,5 +265,5 @@ onUnmounted(stopPolling)
 </template>
 
 <style scoped>
-.action-error{margin-bottom:12px}.source-options{display:grid;gap:6px}.source-options .el-checkbox{max-width:100%;overflow:hidden}.skill-card small{display:block;color:#7a8599;margin:6px 0}.task-row{padding:10px 0;border-bottom:1px solid #edf0f5}.task-error{color:#d84c4c;font-size:13px;overflow-wrap:anywhere}.citation small{display:block;margin-top:4px}.artifact-area h3{margin-top:22px}blockquote{line-height:1.7;overflow-wrap:anywhere}
+.action-error{margin-bottom:12px}.source-options{display:grid;gap:6px}.source-options .el-checkbox{max-width:100%;overflow:hidden}.skill-card small{display:block;color:#7a8599;margin:6px 0}.task-row{padding:10px;border-bottom:1px solid #edf0f5}.task-row.focused{background:#f3f7ff}.task-error{color:#d84c4c;font-size:13px;overflow-wrap:anywhere}.citation small{display:block;margin-top:4px}.artifact-area h3{margin-top:22px}blockquote{line-height:1.7;overflow-wrap:anywhere}
 </style>
