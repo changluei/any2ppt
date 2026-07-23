@@ -55,6 +55,8 @@ export type Task = {
   result_artifact_id?: string
   error_code?: string
   error_message?: string
+  started_at?: string
+  finished_at?: string
   created_at: string
   updated_at: string
 }
@@ -118,4 +120,4 @@ export type GraphState = {
   issues: Array<{ issue_type: string; target_id: string; severity: string; suggestion: string }>
 }
 export type ExportJob = { job_id: string; status: string; error_message?: string }
-export type ApiError = Error & { code?: string; traceId?: string; status?: number }
+export type ApiError = Error & { code?: string; traceId?: string; status?: number; currentVersion?: number }
