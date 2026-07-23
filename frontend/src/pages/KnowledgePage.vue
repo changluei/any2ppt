@@ -108,6 +108,7 @@ async function changeSource(source: Source, action: 'retry' | 'remove') {
 }
 
 async function search() {
+  if (searching.value) return
   if (!query.value.trim()) return ElMessage.warning('请输入检索问题')
   searching.value = true
   searched.value = true

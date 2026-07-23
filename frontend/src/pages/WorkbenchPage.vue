@@ -71,8 +71,10 @@ async function loadVersions(versionNo?: number) {
     selectedVersion.value = undefined
     return
   }
-  versions.value = await api.versions(latest.artifact_id)
-  selectedVersion.value = versionNo || latest.version_no
+  try {
+    versions.value = await api.versions(latest.artifact_id)
+    selectedVersion.value = versionNo || latest.version_no
+  } catch (error) { actionError.value = error as ApiError }
 }
 
 async function load() {
@@ -100,14 +102,16 @@ async function load() {
 }
 
 async function refreshTasks() {
+  let loaded = false
   try {
     ;[tasks.value, artifacts.value] = await Promise.all([api.tasks(projectId), api.artifacts(projectId)])
     selectedSlide.value ||= deck.value?.content.slides?.[0]?.slide_id || ''
     if (!shouldPoll(tasks.value)) await loadVersions()
+    loaded = true
   } catch (error) {
     actionError.value = error as ApiError
   } finally {
-    schedulePolling()
+    if (loaded) schedulePolling()
   }
 }
 
@@ -151,12 +155,12 @@ async function changeTask(task: Task, action: 'cancel' | 'retry') {
 }
 
 async function copyTrace(traceId: string) {
-  await navigator.clipboard.writeText(traceId)
-  ElMessage.success('trace_id 已复制')
+  try { await navigator.clipboard.writeText(traceId); ElMessage.success('trace_id 已复制') }
+  catch { ElMessage.error('复制失败，请手动记录 trace_id') }
 }
 
 async function reviseArtifact(instruction = revision.value) {
-  if (!artifact.value || !latestArtifact.value || !instruction.trim()) return
+  if (busy.value || !artifact.value || !latestArtifact.value || !instruction.trim()) return
   if (artifact.value.version_no !== latestArtifact.value.version_no) return ElMessage.warning('正在查看旧版本，请先切回最新版或回滚')
   const targetType = activeType.value === 'slide_deck' ? 'slide' : activeType.value === 'speaker_notes' ? 'note' : activeType.value === 'exercise_set' ? 'exercise' : 'stages'
   const targetId = activeType.value === 'lesson_plan' ? artifact.value.content.stages?.[0]?.id || '' : selectedSlide.value
@@ -229,6 +233,7 @@ watch(selected, (value) => { draftMarkdown.value = value?.markdown || '' }, { im
         {{ taskErrorText(actionError.code, actionError.message) }}
         <el-tag v-if="actionError.code" type="danger" size="small">{{ actionError.code }}</el-tag>
         <el-button v-if="actionError.traceId" link type="danger" @click="copyTrace(actionError.traceId)">复制 trace_id</el-button>
+        <el-button link type="danger" @click="refreshTasks">重试刷新</el-button>
       </template>
     </el-alert>
 
@@ -255,7 +260,7 @@ watch(selected, (value) => { draftMarkdown.value = value?.markdown || '' }, { im
 
         <el-divider /><p class="eyebrow">最近任务</p>
         <div v-if="!tasks.length" class="muted">尚未发起任务</div>
-        <div v-for="task in tasks.slice(0, 5)" :key="task.id" :class="['task-row',{focused:task.id === focusedTaskId}]">
+        <div v-for="task in tasks" :key="task.id" :class="['task-row',{focused:task.id === focusedTaskId}]">
           <div><StatusTag :status="task.status" /> <span class="meta">{{ task.stage }} · {{ task.progress }}%</span></div>
           <el-progress v-if="['pending','running'].includes(task.status)" :percentage="task.progress" :show-text="false" />
           <p v-if="task.error_message || task.error_code" class="task-error">{{ taskErrorText(task.error_code, task.error_message) }}</p>
@@ -328,5 +333,5 @@ watch(selected, (value) => { draftMarkdown.value = value?.markdown || '' }, { im
 </template>
 
 <style scoped>
-.action-error{margin-bottom:12px}.source-options{display:grid;gap:6px}.source-options .el-checkbox{max-width:100%;overflow:hidden}.skill-card small{display:block;color:#7a8599;margin:6px 0}.task-row{padding:10px;border-bottom:1px solid #edf0f5}.task-row.focused{background:#f3f7ff}.task-error{color:#d84c4c;font-size:13px;overflow-wrap:anywhere}.citation small{display:block;margin-top:4px}.artifact-area h3{margin-top:22px}.section-title{display:flex;align-items:center;justify-content:space-between}.point-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.point-grid>div{padding:0 14px;background:#f7f9fc;border-radius:10px}.slide-frame{width:100%;height:420px;border:0;border-radius:12px}.source-line{margin-top:8px}.version-row{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #edf0f5}blockquote{line-height:1.7;overflow-wrap:anywhere}
+.action-error{margin-bottom:12px}.source-options{display:grid;gap:6px}.source-options .el-checkbox{max-width:100%;height:auto;white-space:normal;overflow-wrap:anywhere}.skill-card small{display:block;color:#7a8599;margin:6px 0}.task-row{padding:10px;border-bottom:1px solid #edf0f5}.task-row.focused{background:#f3f7ff}.task-error{color:#d84c4c;font-size:13px;overflow-wrap:anywhere}.citation,.citation b,.citation small{overflow-wrap:anywhere}.citation small{display:block;margin-top:4px}.artifact-area h3{margin-top:22px}.section-title{display:flex;align-items:center;justify-content:space-between}.point-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.point-grid>div{padding:0 14px;background:#f7f9fc;border-radius:10px}.slide-frame{width:100%;height:420px;border:0;border-radius:12px}.source-line{margin-top:8px}.version-row{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #edf0f5}blockquote{line-height:1.7;overflow-wrap:anywhere}
 </style>

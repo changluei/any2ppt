@@ -43,3 +43,8 @@ export function elapsedText(start?: string, end?: string) {
   const seconds = Math.max(0, Math.round((new Date(end || Date.now()).getTime() - new Date(start).getTime()) / 1000))
   return `${seconds} 秒`
 }
+
+export const httpStatusText = (status?: number) => ({
+  401: '登录状态已失效，请重新登录', 404: '请求的项目或内容不存在',
+  409: '数据已发生变化，请刷新后重试', 500: '服务器暂时不可用，请稍后重试',
+})[status || 0] || '暂时无法连接后端'

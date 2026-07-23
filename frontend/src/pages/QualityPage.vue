@@ -31,7 +31,7 @@ async function load() {
   error.value = undefined
   try { graph.value = await api.graph(projectId) }
   catch (requestError) { error.value = requestError as ApiError }
-  finally { loading.value = false; schedule() }
+  finally { loading.value = false; if (!error.value) schedule() }
 }
 
 async function decide(decision: 'accept' | 'revise' | 'cancel') {
@@ -59,8 +59,8 @@ function locate(issue: QualityIssue) {
 
 async function copyThread() {
   if (!graph.value.thread_id) return
-  await navigator.clipboard.writeText(graph.value.thread_id)
-  ElMessage.success('thread_id 已复制')
+  try { await navigator.clipboard.writeText(graph.value.thread_id); ElMessage.success('thread_id 已复制') }
+  catch { ElMessage.error('复制失败，请手动记录 thread_id') }
 }
 
 onMounted(load)
@@ -76,6 +76,7 @@ onUnmounted(() => clearTimeout(timer))
     <AppLoading v-if="loading" />
     <AppError v-else-if="error && !graph.id" :error="error.message" @retry="load" />
     <div v-else class="panel panel-pad">
+      <el-alert v-if="error" type="error" :closable="false" :title="error.message"><template #default><el-button link type="danger" @click="load">重试</el-button></template></el-alert>
       <div class="flow-head"><div><h3>流程状态 <StatusTag :status="graph.status" /></h3><p class="meta">总尝试 {{ graph.attempt || 0 }} 次 · 已用 {{ elapsedText(graph.created_at, graph.updated_at) }}</p></div><el-button v-if="graph.thread_id" text @click="copyThread">复制 thread_id</el-button></div>
       <div v-if="graph.nodes.length" class="node-flow">
         <template v-for="(node,index) in graph.nodes" :key="node.node_id"><button :class="['node',node.status,{current:node.node_id === graph.current_node}]" type="button"><b>{{ labels[node.node_id] || node.node_id }}</b><small><StatusTag :status="node.status" /> · 尝试 {{ node.attempt }}</small></button><span v-if="index < graph.nodes.length - 1">→</span></template>
