@@ -48,9 +48,12 @@ uvicorn app.main:app --reload
 
 ```bash
 cd frontend
+cp .env.example .env
 pnpm install
 pnpm dev
 ```
+
+Windows PowerShell 将复制命令改为 `Copy-Item .env.example .env`。演示课题按钮只填课程输入，不包含任何预生成的 AI 结果。
 
 验证：`pnpm typecheck && pnpm test && pnpm build`、`pytest backend/tests tests/contract`、`python tests/e2e/smoke.py`。
 
