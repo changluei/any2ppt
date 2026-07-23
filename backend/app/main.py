@@ -8,11 +8,14 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app.ai.skills import registry
+from app.ai.schemas import LessonContext
 from app.ai.vector_store import ProjectVectorStore
-from app.api.routes import artifacts, projects, sources, tasks, workflow
+from app.api.routes import artifacts, images, projects, sources, tasks, workflow
 from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.services.recovery_service import recover_interrupted_work
+from app.schemas.api import ThemeRecommendationRequest
+from app.services.theme_service import public_themes, select_theme
 
 settings = get_settings()
 
@@ -26,7 +29,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
-    description="小学单课时 AI 备课、可追溯 RAG、版本化产物与双包导出服务。",
+    description="小学单课时 AI 备课、可追溯 RAG、版本化课件与 PPTX 导出服务。",
     lifespan=lifespan,
 )
 app.add_middleware(
@@ -142,8 +145,28 @@ def skills():
     return registry()
 
 
+@app.get("/api/themes")
+def themes():
+    return public_themes()
+
+
+@app.post("/api/themes/recommend")
+def recommend_theme(data: ThemeRecommendationRequest):
+    return select_theme(
+        LessonContext(
+            project_id="theme-preview",
+            subject=data.subject or "未指定学科",
+            grade=data.grade or "未指定年级",
+            lesson_topic=data.lesson_topic or "未指定课题",
+            student_profile=data.student_profile,
+            teacher_requirements=data.teacher_requirements,
+        )
+    )
+
+
 app.include_router(projects.router)
 app.include_router(sources.router)
+app.include_router(images.router)
 app.include_router(tasks.router)
 app.include_router(artifacts.router)
 app.include_router(workflow.router)

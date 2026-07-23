@@ -8,12 +8,14 @@ export type Project = {
   lesson_count: number
   student_profile: string
   teacher_requirements: string
+  theme_id: string
+  theme_status: 'selected' | 'preparing' | 'ready' | 'failed'
   status: string
   created_at: string
   updated_at: string
 }
 
-export type ProjectInput = Omit<Project, 'id' | 'status' | 'created_at' | 'updated_at'>
+export type ProjectInput = Omit<Project, 'id' | 'status' | 'theme_status' | 'created_at' | 'updated_at'>
 export type SourceStatus = 'uploaded' | 'parsing' | 'indexing' | 'ready' | 'failed'
 export type Source = {
   id: string
@@ -43,6 +45,45 @@ export type Citation = {
   score?: number
 }
 
+export type ThemeDescriptor = {
+  id: string
+  name: string
+  package: string
+  version: string
+  description: string
+  keywords: string[]
+  preview_url: string
+  source_url: string
+  layouts: string[]
+  design_guidance: string
+  density: 'low' | 'medium' | 'high'
+  image_strategy: string
+  theme_config: Record<string, string>
+  palette: { background: string; surface: string; text: string; accent: string }
+}
+export type ProjectImage = {
+  id: string
+  project_id: string
+  original_name: string
+  media_type: string
+  size: number
+  width: number
+  height: number
+  content_url: string
+  created_at: string
+}
+export type SlideImagePlacement = {
+  placement_id: string
+  image_id: string
+  original_name: string
+  position: 'left' | 'right' | 'center' | 'wide' | 'background'
+  caption?: string
+  x: number
+  y: number
+  width: number
+  height: number
+  opacity: number
+}
 export type Skill = { id: string; name: string; description: string; required_inputs: string[] }
 export type TaskStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 export type Task = {
@@ -97,6 +138,8 @@ export type Slide = {
   teaching_stage: string
   objective_ids?: string[]
   citations?: Citation[]
+  speaker_note?: Partial<SpeakerNote>
+  images?: SlideImagePlacement[]
 }
 export type SpeakerNote = {
   slide_id: string
@@ -132,6 +175,20 @@ export type ArtifactContent = {
   slides?: Slide[]
   notes?: SpeakerNote[]
   exercises?: Exercise[]
+  theme?: string
+  theme_id?: string
+  theme_name?: string
+  theme_version?: string
+  theme_description?: string
+  theme_match_reason?: string
+  theme_palette?: ThemeDescriptor['palette']
+  theme_preview_url?: string
+  theme_source_url?: string
+  theme_layouts?: string[]
+  theme_design_guidance?: string
+  theme_image_strategy?: string
+  theme_density?: ThemeDescriptor['density']
+  theme_config?: Record<string, string>
 }
 export type ArtifactType = 'lesson_plan' | 'slide_deck' | 'speaker_notes' | 'exercise_set'
 export type Artifact = {
@@ -178,7 +235,7 @@ export type QualityIssue = { issue_type: string; target_id: string; severity: st
 export type ExportJob = {
   job_id: string
   project_id?: string
-  package_type?: 'teacher' | 'student'
+  package_type?: 'teacher' | 'student' | 'pptx'
   selected_versions?: Record<string, string>
   status: string
   error_message?: string

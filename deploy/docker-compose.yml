@@ -25,16 +25,31 @@ services:
       CHROMA_PERSIST_DIR: /app/data/chroma
       UPLOAD_DIR: /app/data/uploads
       EXPORT_DIR: /app/data/exports
+      THEME_CACHE_DIR: /app/data/themes
+      SLIDEV_RENDERER_URL: http://renderer:3010
       AI_FORCE_FALLBACK: ${AI_FORCE_FALLBACK:-false}
     ports: ["8000:8000"]
     volumes: ["app_data:/app/data"]
     depends_on:
       mysql: {condition: service_healthy}
+      renderer: {condition: service_healthy}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
       timeout: 5s
       retries: 10
+  renderer:
+    build: ../renderer
+    environment:
+      RENDER_ROOT: /data/render_jobs
+      THEME_ROOT: /data/themes
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+    volumes: ["app_data:/data"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3010/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
   frontend:
     build:
       context: ../frontend

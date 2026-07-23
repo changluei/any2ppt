@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     chroma_persist_dir: Path = Path("data/chroma")
     upload_dir: Path = Path("data/uploads")
     export_dir: Path = Path("data/exports")
+    theme_cache_dir: Path = Path("data/themes")
+    slidev_renderer_url: str = ""
+    slidev_renderer_timeout_seconds: int = 180
     max_upload_mb: int = 20
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     model_config = SettingsConfigDict(

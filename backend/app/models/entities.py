@@ -32,9 +32,12 @@ class Project(Base, TimestampMixin):
     lesson_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     student_profile: Mapped[str] = mapped_column(Text, default="", nullable=False)
     teacher_requirements: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    theme_id: Mapped[str] = mapped_column(String(64), default="default", nullable=False)
+    theme_status: Mapped[str] = mapped_column(String(24), default="selected", nullable=False)
     status: Mapped[str] = mapped_column(String(24), default="draft", index=True, nullable=False)
 
     sources = relationship("SourceDocument", cascade="all, delete-orphan", passive_deletes=True)
+    images = relationship("ProjectImage", cascade="all, delete-orphan", passive_deletes=True)
     tasks = relationship("AITask", cascade="all, delete-orphan", passive_deletes=True)
     artifacts = relationship("LessonArtifact", cascade="all, delete-orphan", passive_deletes=True)
     graphs = relationship("GraphRun", cascade="all, delete-orphan", passive_deletes=True)
@@ -59,6 +62,25 @@ class SourceDocument(Base, TimestampMixin):
     storage_path: Mapped[str] = mapped_column(String(500), nullable=False)
     status: Mapped[str] = mapped_column(String(24), default="uploaded", index=True, nullable=False)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class ProjectImage(Base, TimestampMixin):
+    __tablename__ = "project_images"
+    __table_args__ = (
+        UniqueConstraint("project_id", "sha256", name="uq_project_image_hash"),
+        Index("ix_project_image_created", "project_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    stored_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    storage_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    width: Mapped[int] = mapped_column(Integer, nullable=False)
+    height: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class AITask(Base, TimestampMixin):

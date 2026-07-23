@@ -1,0 +1,115 @@
+[
+  {
+    "id": "default",
+    "name": "清晰通用",
+    "package": "@slidev/theme-default",
+    "version": "0.25.0",
+    "description": "结构清楚、留白适中，适合大多数课堂讲授和综合课。",
+    "keywords": ["通用", "清晰", "课堂", "综合", "正式"],
+    "match_terms": ["通用", "清晰", "综合", "正式", "常规"],
+    "preview_url": "/theme-previews/default.png",
+    "source_url": "https://www.npmjs.com/package/@slidev/theme-default",
+    "layouts": ["cover", "default", "fact", "intro", "quote", "section", "statement"],
+    "design_guidance": "以清晰层级和充分留白为主；封面使用 cover，章节过渡使用 section，核心结论使用 fact 或 statement，其余页面使用 default。每页最多一个核心结论和三到五个要点。",
+    "density": "medium",
+    "image_strategy": "图片用于证据、情境或对比，避免纯装饰；有图片时优先在 default 页面使用右侧或背景定位。",
+    "theme_config": {},
+    "palette": {
+      "background": "#ffffff",
+      "surface": "#eef3f8",
+      "text": "#1f2937",
+      "accent": "#2563eb"
+    }
+  },
+  {
+    "id": "seriph",
+    "name": "人文阅读",
+    "package": "@slidev/theme-seriph",
+    "version": "0.25.0",
+    "description": "带有书卷气和柔和排版，适合语文、阅读、历史与故事类课程。",
+    "keywords": ["语文", "阅读", "文学", "故事", "历史", "人文"],
+    "match_terms": ["语文", "阅读", "文学", "故事", "古诗", "历史", "人文", "文本"],
+    "preview_url": "/theme-previews/seriph.png",
+    "source_url": "https://www.npmjs.com/package/@slidev/theme-seriph",
+    "layouts": ["cover", "default", "fact", "intro", "quote", "section", "statement"],
+    "design_guidance": "强调阅读节奏和文本气质；封面与章节页留白，引用页使用 quote，人物品质或中心思想使用 statement，正文避免信息堆叠。",
+    "density": "low",
+    "image_strategy": "适合人物、场景、文本局部和作品图片；图片与短引文组合，单页不超过两张。",
+    "theme_config": {},
+    "palette": {
+      "background": "#fbfaf7",
+      "surface": "#f1eee6",
+      "text": "#352f2a",
+      "accent": "#9a5b3f"
+    }
+  },
+  {
+    "id": "apple-basic",
+    "name": "极简聚焦",
+    "package": "@slidev/theme-apple-basic",
+    "version": "0.25.1",
+    "description": "大留白、强重点、信息克制，适合数学、逻辑推导和重点讲解。",
+    "keywords": ["数学", "逻辑", "简洁", "极简", "重点", "现代"],
+    "match_terms": ["数学", "逻辑", "推导", "计算", "公式", "简洁", "极简", "现代", "重点"],
+    "preview_url": "/theme-previews/apple-basic.png",
+    "source_url": "https://www.npmjs.com/package/@slidev/theme-apple-basic",
+    "layouts": ["intro", "default", "bullets", "fact", "image-right", "intro-image", "intro-image-right", "quote", "section", "statement", "3-images"],
+    "design_guidance": "使用大字号、短句和逐步揭示；概念引入使用 intro，步骤与条件使用 bullets，公式或关键结论使用 fact，配图说明使用 image-right。",
+    "density": "low",
+    "image_strategy": "只使用能解释概念或步骤的图片；优先 image-right，三图对比时使用 3-images。",
+    "theme_config": {},
+    "palette": {
+      "background": "#f5f5f7",
+      "surface": "#ffffff",
+      "text": "#1d1d1f",
+      "accent": "#0071e3"
+    }
+  },
+  {
+    "id": "bricks",
+    "name": "活力探索",
+    "package": "@slidev/theme-bricks",
+    "version": "0.25.0",
+    "description": "色块鲜明、节奏活泼，适合小学科学、活动探究和互动课堂。",
+    "keywords": ["科学", "探究", "活动", "互动", "小学", "活泼"],
+    "match_terms": ["科学", "探究", "实验", "活动", "互动", "小学", "游戏", "观察", "活泼"],
+    "preview_url": "/theme-previews/bricks.png",
+    "source_url": "https://www.npmjs.com/package/@slidev/theme-bricks",
+    "layouts": ["cover", "default", "fact", "intro", "items", "quote", "section", "statement"],
+    "design_guidance": "用鲜明色块区分课堂节奏；问题导入使用 cover 或 intro，任务清单使用 items，实验结论使用 fact，环节切换使用 section。",
+    "density": "medium",
+    "image_strategy": "优先使用实验现象、过程记录和生活情境图片；图片应占据明显视觉区域。",
+    "theme_config": {},
+    "palette": {
+      "background": "#fffaf0",
+      "surface": "#ffffff",
+      "text": "#283044",
+      "accent": "#e76f51"
+    }
+  },
+  {
+    "id": "tahta",
+    "name": "结构图解",
+    "package": "slidev-theme-tahta",
+    "version": "0.13.2",
+    "description": "版式类型丰富、结构感强，适合需要步骤、比较、时间线和图解的课程。",
+    "keywords": ["结构", "图解", "步骤", "时间线", "比较", "高级"],
+    "match_terms": ["结构", "图解", "步骤", "流程", "比较", "时间线", "高级", "展示", "逻辑"],
+    "preview_url": "/theme-previews/tahta.png",
+    "source_url": "https://www.npmjs.com/package/slidev-theme-tahta",
+    "layouts": ["cover", "default", "lead", "section", "statement", "fact", "quote", "steps", "compare", "timeline", "two-cols", "columns", "panels", "define", "diagram", "image", "showcase", "end"],
+    "design_guidance": "根据内容语义主动选择结构化版式：流程使用 steps，异同使用 compare，发展过程使用 timeline，概念解释使用 define，关系结构使用 diagram，双向内容使用 two-cols，收束使用 end。避免所有页面使用同一种版式。",
+    "density": "medium",
+    "image_strategy": "图像用于主题情境、过程或结果展示；单图使用 image，多图重点展示使用 showcase，图文分栏使用 two-cols。",
+    "theme_config": {
+      "variant": "notebook",
+      "accent": "#5b6ee1"
+    },
+    "palette": {
+      "background": "#f7f5ee",
+      "surface": "#ffffff",
+      "text": "#202335",
+      "accent": "#5b6ee1"
+    }
+  }
+]

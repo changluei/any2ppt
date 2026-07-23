@@ -1,76 +1,42 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { Collection, Expand, Fold, FolderOpened } from '@element-plus/icons-vue'
 import { useRoute } from 'vue-router'
-import { useAppStore } from './stores/app'
-import { useProjectStore } from './stores/project'
 
 const route = useRoute()
-const app = useAppStore()
-const project = useProjectStore()
+const collapsed = ref(localStorage.getItem('sidebar-collapsed') === 'true')
+const pages = [
+  { label: '备课项目', path: '/projects', icon: FolderOpened },
+  { label: '知识库', path: '/knowledge', icon: Collection },
+]
+const activePage = computed(() => route.path.startsWith('/workbench') ? '/projects' : route.path)
 
-const pages = computed(() => [
-  ['备课项目', '/projects'],
-  ['资料知识库', '/knowledge'],
-  ['备课工作台', project.currentProjectId && `/workbench/${project.currentProjectId}`],
-  ['质量检查', project.currentProjectId && `/quality/${project.currentProjectId}`],
-  ['成果导出', project.currentProjectId && `/export/${project.currentProjectId}`],
-])
-const healthText = computed(
-  () =>
-    ({
-      checking: '正在连接服务',
-      online: '服务运行正常',
-      offline: '后端暂不可用',
-      timeout: '后端响应超时',
-    })[app.backend],
-)
-
-watch(
-  () => route.params.projectId,
-  (id) => typeof id === 'string' && project.select(id),
-  { immediate: true },
-)
-onMounted(app.checkHealth)
+watch(collapsed, (value) => localStorage.setItem('sidebar-collapsed', String(value)))
 </script>
 
 <template>
-  <el-container class="shell">
-    <el-aside width="236px" class="sidebar">
-      <div class="brand">
-        <div class="brand-mark">L</div>
-        <div><b>LessonDeck</b><small>智慧备课工作台</small></div>
-      </div>
-
-      <el-menu router :default-active="route.path" class="nav">
-        <el-menu-item
-          v-for="([label, path], index) in pages"
-          :key="label"
-          :index="path || `disabled-${index}`"
-          :disabled="!path"
-        >
-          {{ label }}
+  <el-container :class="['shell',{collapsed}]">
+    <el-aside :width="collapsed ? '72px' : '208px'" class="sidebar">
+      <div v-if="!collapsed" class="sidebar-title">AI 备课助手</div>
+      <el-menu router :default-active="activePage" :collapse="collapsed" class="nav">
+        <el-menu-item v-for="page in pages" :key="page.path" :index="page.path">
+          <el-icon><component :is="page.icon" /></el-icon>
+          <template #title>{{ page.label }}</template>
         </el-menu-item>
       </el-menu>
-
-      <div class="sidebar-foot">
-        <span :class="['health-dot', app.backend]" />{{ healthText }}
-        <el-button v-if="['offline', 'timeout'].includes(app.backend)" link @click="app.checkHealth">
-          重试
-        </el-button>
-      </div>
     </el-aside>
 
-    <el-container>
+    <el-container class="content-shell">
       <el-header class="topbar">
-        <div>
-          <p class="eyebrow">面向智慧教育 · {{ route.meta.title }}</p>
-          <h1>面向智慧教育的 AI 备课辅助系统</h1>
+        <div class="topbar-left">
+          <el-button text circle :aria-label="collapsed ? '展开侧栏' : '收起侧栏'" @click="collapsed = !collapsed">
+            <el-icon size="20"><Expand v-if="collapsed" /><Fold v-else /></el-icon>
+          </el-button>
+          <div>
+            <p class="eyebrow">{{ route.meta.title }}</p>
+            <h1>{{ route.path.startsWith('/workbench') ? '项目工作台' : 'AI 备课辅助系统' }}</h1>
+          </div>
         </div>
-        <nav class="top-nav">
-          <RouterLink to="/projects">项目首页</RouterLink>
-          <RouterLink to="/knowledge">知识库</RouterLink>
-        </nav>
-        <el-tag effect="plain" round>教师可控 · 来源可溯</el-tag>
       </el-header>
       <el-main><router-view /></el-main>
     </el-container>
@@ -78,8 +44,7 @@ onMounted(app.checkHealth)
 </template>
 
 <style scoped>
-.top-nav { display: flex; gap: 16px; }
-.top-nav a { color: #5d6b82; text-decoration: none; }
-.top-nav a.router-link-active { color: #2066d4; }
-.health-dot.timeout { background: #f4b55e; }
+.content-shell{margin-left:208px;transition:margin-left .22s ease}.shell.collapsed .content-shell{margin-left:72px}
+.sidebar-title{height:72px;display:flex;align-items:center;padding:0 22px;font-size:16px;font-weight:700;color:#26324b;white-space:nowrap}
+.topbar-left{display:flex;align-items:center;gap:12px}.topbar-left h1{font-size:18px}
 </style>

@@ -5,6 +5,7 @@ export function validateProject(form: ProjectInput): string | null {
   if (!form.subject.trim() || !form.grade.trim()) return '请填写学科和年级'
   if (!form.lesson_topic.trim()) return '请填写课题'
   if (form.lesson_count < 1 || form.lesson_count > 8) return '课时数应为 1—8'
+  if (!form.theme_id) return '请选择课件模板'
   return null
 }
 

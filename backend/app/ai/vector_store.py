@@ -194,6 +194,17 @@ class ProjectVectorStore:
                 raise RetrievalError("从 Chroma 删除资料失败") from exc
         self._save(project_id, [row for row in self._load(project_id) if row["source_id"] != source_id])
 
+    def delete_project(self, project_id: str) -> None:
+        client = self._get_client()
+        if client is not None:
+            try:
+                client.delete_collection(self.collection_name(project_id))
+            except Exception as exc:
+                if "does not exist" not in str(exc).lower() and "not found" not in str(exc).lower():
+                    raise RetrievalError("删除项目向量库失败") from exc
+            return
+        self._path(project_id).unlink(missing_ok=True)
+
     def count(self, project_id: str, source_id: str | None = None) -> int:
         client = self._get_client()
         if client is not None:

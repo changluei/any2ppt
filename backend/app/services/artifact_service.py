@@ -1,5 +1,7 @@
 import hashlib
 import json
+import uuid
+from copy import deepcopy
 from datetime import datetime
 
 from sqlalchemy.orm import Session
@@ -9,10 +11,120 @@ from app.ai.graph import initial_node_state, review_quality
 from app.ai.schemas import LessonContext, SkillRequest
 from app.ai.skills import run_skill
 from app.core.database import SessionLocal
-from app.models import AITask, ArtifactVersion, GraphRun, LessonArtifact, Project
+from app.models import AITask, ArtifactVersion, GraphRun, LessonArtifact, Project, ProjectImage
+from app.services.theme_service import select_theme
 
 
 ARTIFACT_TYPES = ("lesson_plan", "slide_deck", "speaker_notes", "exercise_set")
+
+
+def compose_ppt_artifact(artifacts: dict[str, dict], theme: dict | None = None) -> dict:
+    """Fold every teacher-facing deliverable into one slide-deck contract."""
+    deck = deepcopy(artifacts["slide_deck"])
+    plan = artifacts["lesson_plan"]
+    note_rows = artifacts["speaker_notes"].get("notes", [])
+    notes = {
+        item["slide_id"]: item
+        for item in note_rows
+    }
+    exercises = artifacts["exercise_set"].get("exercises", [])
+    slides = deck.get("slides", [])
+    theme_layouts = (theme or {}).get("layouts", ["default"])
+    default_layout = "default" if "default" in theme_layouts else theme_layouts[0]
+
+    def slide_at(order: int) -> dict | None:
+        return next((item for item in slides if item.get("order") == order), None)
+
+    objectives = plan.get("objectives", [])
+    target = slide_at(4)
+    if target:
+        target["markdown"] = "# 本课学习目标\n\n" + "\n".join(
+            f"- {item.get('behavior', '')}（{item.get('criterion', '完成课堂任务')}）"
+            for item in objectives
+        )
+
+    target = slide_at(9)
+    if target:
+        key_points = "；".join(plan.get("key_points", [])) or "围绕课题形成核心理解"
+        difficult = "；".join(plan.get("difficult_points", [])) or "把所学迁移到新情境"
+        target["markdown"] = f"# 学习要点\n\n**重点：** {key_points}\n\n**难点：** {difficult}"
+
+    for order, level in ((11, "基础"), (12, "巩固"), (13, "提高")):
+        target = slide_at(order)
+        items = [item for item in exercises if item.get("level") == level]
+        if target and items:
+            blocks = []
+            for index, item in enumerate(items, 1):
+                blocks.append(
+                    f"## {level}题 {index}\n\n{item.get('question', '')}"
+                    f"\n\n**参考答案：** {item.get('answer', '')}"
+                    f"\n\n**解析：** {item.get('explanation', '')}"
+                )
+            target["markdown"] = f"# {level}练习\n\n" + "\n\n".join(blocks)
+
+    stages = plan.get("stages", [])
+    if len(slides) < 18:
+        slides.append({
+            "slide_id": f"SLIDE-{len(slides) + 1:02d}",
+            "order": len(slides) + 1,
+            "title": "教学流程",
+            "layout": "steps" if "steps" in theme_layouts else default_layout,
+            "markdown": "# 教学流程\n\n" + "\n".join(
+                f"- {item.get('name', '')} · {item.get('time_minutes', 0)} 分钟：{item.get('student_actions', '')}"
+                for item in stages
+            ),
+            "teaching_stage": stages[0].get("id", "STAGE-1") if stages else "STAGE-1",
+            "objective_ids": [item.get("id") for item in objectives if item.get("id")],
+            "citations": [],
+        })
+    assessments = plan.get("assessments", [])
+    if len(slides) < 18:
+        slides.append({
+            "slide_id": f"SLIDE-{len(slides) + 1:02d}",
+            "order": len(slides) + 1,
+            "title": "课堂评价",
+            "layout": "panels" if "panels" in theme_layouts else ("fact" if "fact" in theme_layouts else default_layout),
+            "markdown": "# 课堂评价\n\n" + "\n".join(
+                f"- {item.get('method', '')}：{item.get('success_criteria', '')}"
+                for item in assessments
+            ),
+            "teaching_stage": stages[-1].get("id", "STAGE-4") if stages else "STAGE-4",
+            "objective_ids": [item.get("id") for item in objectives if item.get("id")],
+            "citations": [],
+        })
+
+    for slide in slides:
+        if slide.get("slide_id") not in notes:
+            note = {
+                "slide_id": slide.get("slide_id"),
+                "explanation": f"结合“{slide.get('title', '')}”组织学生表达，并根据回答追问理由。",
+                "questions": [f"关于“{slide.get('title', '')}”，你能说出哪些发现？"],
+                "expected_answers": ["学生结合本页信息说明自己的发现和依据。"],
+                "transition": "接下来进入下一个学习任务。",
+                "board_notes": slide.get("title", ""),
+                "estimated_minutes": 2,
+            }
+            note_rows.append(note)
+            notes[slide.get("slide_id")] = note
+        slide["speaker_note"] = notes.get(slide.get("slide_id"), {})
+    deck["slides"] = slides
+    deck["contains_full_lesson"] = True
+    if theme:
+        deck["theme"] = theme["package"]
+        deck["theme_id"] = theme["id"]
+        deck["theme_name"] = theme["name"]
+        deck["theme_version"] = theme["version"]
+        deck["theme_description"] = theme["description"]
+        deck["theme_match_reason"] = theme["match_reason"]
+        deck["theme_palette"] = theme["palette"]
+        deck["theme_preview_url"] = theme["preview_url"]
+        deck["theme_source_url"] = theme["source_url"]
+        deck["theme_layouts"] = theme["layouts"]
+        deck["theme_design_guidance"] = theme["design_guidance"]
+        deck["theme_image_strategy"] = theme["image_strategy"]
+        deck["theme_density"] = theme["density"]
+        deck["theme_config"] = theme["theme_config"]
+    return deck
 
 
 def artifact_out(artifact: LessonArtifact, version: ArtifactVersion) -> dict:
@@ -127,7 +239,34 @@ def run_generation_task(task_id: str) -> None:
             task.finished_at = datetime.utcnow()
             db.commit()
             return
-        context = LessonContext(project_id=project.id, subject=project.subject, grade=project.grade, textbook_version=project.textbook_version, lesson_topic=project.lesson_topic, lesson_count=project.lesson_count, student_profile=project.student_profile, selected_source_ids=task.input_snapshot.get("selected_source_ids", []), teacher_requirements=task.input_snapshot.get("teacher_requirements") or project.teacher_requirements)
+        selected_theme = select_theme(
+            LessonContext(
+                project_id=project.id,
+                subject=project.subject,
+                grade=project.grade,
+                lesson_topic=project.lesson_topic,
+                student_profile=project.student_profile,
+                teacher_requirements=task.input_snapshot.get("teacher_requirements") or project.teacher_requirements,
+            ),
+            project.theme_id,
+        )
+        context = LessonContext(
+            project_id=project.id,
+            subject=project.subject,
+            grade=project.grade,
+            textbook_version=project.textbook_version,
+            lesson_topic=project.lesson_topic,
+            lesson_count=project.lesson_count,
+            student_profile=project.student_profile,
+            selected_source_ids=task.input_snapshot.get("selected_source_ids", []),
+            teacher_requirements=task.input_snapshot.get("teacher_requirements") or project.teacher_requirements,
+            theme_id=selected_theme["id"],
+            theme_name=selected_theme["name"],
+            theme_description=selected_theme["description"],
+            theme_layouts=selected_theme["layouts"],
+            theme_guidance=selected_theme["design_guidance"],
+            theme_image_strategy=selected_theme["image_strategy"],
+        )
         task.stage = "模型生成"
         task.progress = 45
         db.commit()
@@ -145,6 +284,10 @@ def run_generation_task(task_id: str) -> None:
             db.commit()
             return
         bundle = generate_lesson_bundle(context, trace_id=task.trace_id)
+        bundle.artifacts["slide_deck"] = compose_ppt_artifact(
+            bundle.artifacts,
+            selected_theme,
+        )
         if db.get(AITask, task_id).status == "cancelled":
             db.close()
             return
@@ -223,6 +366,154 @@ def revise_artifact(db: Session, artifact: LessonArtifact, base_version_no: int,
             note_current = notes.versions[-1]
             note_content, note_ids = revise_block(note_current.content, "note", target_id, f"同步课件修改：{instruction}", citations=note_current.citations)
             save_version(db, artifact.project_id, notes.type, note_content, note_current.citations, note_current.warnings, "synced_revision", note_ids)
+    db.commit()
+    db.refresh(artifact)
+    return artifact_out(artifact, artifact.versions[-1])
+
+
+def update_slide_markdown(
+    db: Session,
+    artifact: LessonArtifact,
+    base_version_no: int,
+    slide_id: str,
+    markdown: str,
+) -> dict:
+    """Persist a teacher's direct Markdown edit as an immutable deck version."""
+    if artifact.type != "slide_deck":
+        raise ValueError("只有课件支持 Markdown 源码编辑")
+    if artifact.current_version_no != base_version_no:
+        raise RuntimeError(f"VERSION_CONFLICT:{artifact.current_version_no}")
+
+    current = artifact.versions[-1]
+    content = deepcopy(current.content)
+    target = next(
+        (item for item in content.get("slides", []) if item.get("slide_id") == slide_id),
+        None,
+    )
+    if not target:
+        raise ValueError("未找到需要修改的课件页")
+
+    normalized = markdown.strip()
+    if target.get("markdown", "").strip() == normalized:
+        return artifact_out(artifact, current)
+    target["markdown"] = normalized
+    heading = next(
+        (
+            line.removeprefix("# ").strip()
+            for line in normalized.splitlines()
+            if line.startswith("# ") and line.removeprefix("# ").strip()
+        ),
+        None,
+    )
+    if heading:
+        target["title"] = heading[:160]
+
+    save_version(
+        db,
+        artifact.project_id,
+        artifact.type,
+        content,
+        current.citations,
+        current.warnings,
+        "manual_markdown",
+        [slide_id],
+    )
+    db.commit()
+    db.refresh(artifact)
+    return artifact_out(artifact, artifact.versions[-1])
+
+
+IMAGE_PLACEMENT_PRESETS = {
+    "left": {"x": 4, "y": 18, "width": 40, "height": 66, "opacity": 1},
+    "right": {"x": 56, "y": 18, "width": 40, "height": 66, "opacity": 1},
+    "center": {"x": 25, "y": 16, "width": 50, "height": 70, "opacity": 1},
+    "wide": {"x": 10, "y": 34, "width": 80, "height": 54, "opacity": 1},
+    "background": {"x": 0, "y": 0, "width": 100, "height": 100, "opacity": 0.3},
+}
+
+
+def add_slide_image(
+    db: Session,
+    artifact: LessonArtifact,
+    base_version_no: int,
+    slide_id: str,
+    image: ProjectImage,
+    position: str,
+    caption: str,
+) -> dict:
+    if artifact.type != "slide_deck":
+        raise ValueError("只有课件支持添加图片")
+    if artifact.project_id != image.project_id:
+        raise ValueError("图片不属于当前备课项目")
+    if artifact.current_version_no != base_version_no:
+        raise RuntimeError(f"VERSION_CONFLICT:{artifact.current_version_no}")
+    if position not in IMAGE_PLACEMENT_PRESETS:
+        raise ValueError("图片位置无效")
+
+    current = artifact.versions[-1]
+    content = deepcopy(current.content)
+    target = next(
+        (item for item in content.get("slides", []) if item.get("slide_id") == slide_id),
+        None,
+    )
+    if not target:
+        raise ValueError("未找到需要添加图片的课件页")
+    placement = {
+        "placement_id": str(uuid.uuid4()),
+        "image_id": image.id,
+        "original_name": image.original_name,
+        "position": position,
+        "caption": caption.strip(),
+        **IMAGE_PLACEMENT_PRESETS[position],
+    }
+    target.setdefault("images", []).append(placement)
+    save_version(
+        db,
+        artifact.project_id,
+        artifact.type,
+        content,
+        current.citations,
+        current.warnings,
+        "image_placement",
+        [slide_id],
+    )
+    db.commit()
+    db.refresh(artifact)
+    return artifact_out(artifact, artifact.versions[-1])
+
+
+def remove_slide_image(
+    db: Session,
+    artifact: LessonArtifact,
+    base_version_no: int,
+    placement_id: str,
+) -> dict:
+    if artifact.type != "slide_deck":
+        raise ValueError("只有课件支持移除图片")
+    if artifact.current_version_no != base_version_no:
+        raise RuntimeError(f"VERSION_CONFLICT:{artifact.current_version_no}")
+    current = artifact.versions[-1]
+    content = deepcopy(current.content)
+    changed_slide_id = None
+    for slide in content.get("slides", []):
+        placements = slide.get("images", [])
+        kept = [item for item in placements if item.get("placement_id") != placement_id]
+        if len(kept) != len(placements):
+            slide["images"] = kept
+            changed_slide_id = slide.get("slide_id")
+            break
+    if not changed_slide_id:
+        raise ValueError("未找到需要移除的图片")
+    save_version(
+        db,
+        artifact.project_id,
+        artifact.type,
+        content,
+        current.citations,
+        current.warnings,
+        "image_placement",
+        [changed_slide_id],
+    )
     db.commit()
     db.refresh(artifact)
     return artifact_out(artifact, artifact.versions[-1])

@@ -3,20 +3,287 @@ from __future__ import annotations
 import html
 import json
 import shutil
+import uuid
 import zipfile
 from pathlib import Path
 
+import httpx
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import SessionLocal
-from app.models import ArtifactVersion, ExportJob, LessonArtifact
+from app.models import ArtifactVersion, ExportJob, LessonArtifact, ProjectImage
+from app.services.theme_service import theme_catalog
 
 
 EXPORT_REQUIRED_TYPES = {
     "teacher": {"lesson_plan", "slide_deck", "speaker_notes", "exercise_set"},
     "student": {"slide_deck", "exercise_set"},
+    "pptx": {"slide_deck"},
 }
+
+
+def _plain_markdown(markdown: str) -> list[str]:
+    rows: list[str] = []
+    in_comment = False
+    for raw in markdown.splitlines():
+        clean = raw.strip()
+        if clean.startswith("<!--"):
+            in_comment = True
+        if not in_comment and clean:
+            clean = clean.lstrip("#").strip()
+            clean = clean.replace("**", "").replace("`", "")
+            if clean.startswith(">"):
+                clean = clean[1:].strip()
+            rows.append(clean)
+        if clean.endswith("-->"):
+            in_comment = False
+    return rows
+
+
+def _write_pptx(
+    path: Path,
+    slide_deck: dict,
+    image_paths: dict[str, Path] | None = None,
+) -> None:
+    from pptx import Presentation
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN
+    from pptx.util import Inches, Pt
+
+    presentation = Presentation()
+    presentation.slide_width = Inches(13.333)
+    presentation.slide_height = Inches(7.5)
+    blank = presentation.slide_layouts[6]
+    image_paths = image_paths or {}
+    for index, item in enumerate(slide_deck.get("slides", []), 1):
+        slide = presentation.slides.add_slide(blank)
+        background = slide.background.fill
+        background.solid()
+        background.fore_color.rgb = RGBColor(246, 248, 252)
+
+        accent = slide.shapes.add_shape(1, Inches(0), Inches(0), Inches(0.18), Inches(7.5))
+        accent.fill.solid()
+        accent.fill.fore_color.rgb = RGBColor(82, 105, 236)
+        accent.line.fill.background()
+
+        placements = item.get("images", [])
+        for placement in placements:
+            if placement.get("position") != "background":
+                continue
+            image_path = image_paths.get(placement.get("image_id", ""))
+            if image_path and image_path.is_file():
+                slide.shapes.add_picture(str(image_path), 0, 0, presentation.slide_width, presentation.slide_height)
+
+        title_box = slide.shapes.add_textbox(Inches(0.8), Inches(0.65), Inches(11.7), Inches(0.9))
+        title_frame = title_box.text_frame
+        title_frame.text = item.get("title") or f"第 {index} 页"
+        title_frame.paragraphs[0].font.size = Pt(30)
+        title_frame.paragraphs[0].font.bold = True
+        title_frame.paragraphs[0].font.color.rgb = RGBColor(31, 41, 55)
+
+        body_box = slide.shapes.add_textbox(Inches(0.9), Inches(1.75), Inches(11.4), Inches(4.9))
+        body_frame = body_box.text_frame
+        body_frame.word_wrap = True
+        lines = _plain_markdown(item.get("markdown", ""))
+        if lines and lines[0] == item.get("title"):
+            lines = lines[1:]
+        for line_index, line in enumerate(lines[:16]):
+            paragraph = body_frame.paragraphs[0] if line_index == 0 else body_frame.add_paragraph()
+            paragraph.text = line.lstrip("- ").strip()
+            paragraph.level = 0
+            paragraph.font.size = Pt(20 if len(lines) < 9 else 16)
+            paragraph.font.color.rgb = RGBColor(55, 65, 81)
+            paragraph.space_after = Pt(9)
+
+        number = slide.shapes.add_textbox(Inches(11.9), Inches(6.85), Inches(0.6), Inches(0.3))
+        number.text_frame.text = str(index)
+        number.text_frame.paragraphs[0].alignment = PP_ALIGN.RIGHT
+        number.text_frame.paragraphs[0].font.size = Pt(10)
+        number.text_frame.paragraphs[0].font.color.rgb = RGBColor(148, 163, 184)
+
+        for placement in placements:
+            if placement.get("position") == "background":
+                continue
+            image_path = image_paths.get(placement.get("image_id", ""))
+            if not image_path or not image_path.is_file():
+                continue
+            slide.shapes.add_picture(
+                str(image_path),
+                Inches(13.333 * placement.get("x", 10) / 100),
+                Inches(7.5 * placement.get("y", 20) / 100),
+                Inches(13.333 * placement.get("width", 40) / 100),
+                Inches(7.5 * placement.get("height", 60) / 100),
+            )
+
+        note = item.get("speaker_note") or {}
+        note_lines = [
+            note.get("explanation", ""),
+            "课堂提问：" + "；".join(note.get("questions", [])) if note.get("questions") else "",
+            "板书：" + note.get("board_notes", "") if note.get("board_notes") else "",
+            "过渡：" + note.get("transition", "") if note.get("transition") else "",
+        ]
+        try:
+            slide.notes_slide.notes_text_frame.text = "\n".join(row for row in note_lines if row)
+        except (AttributeError, ValueError):
+            pass
+    presentation.save(path)
+
+
+def _slidev_notes(slide: dict) -> str:
+    note = slide.get("speaker_note") or {}
+    rows = [
+        note.get("explanation", ""),
+        "课堂提问：" + "；".join(note.get("questions", [])) if note.get("questions") else "",
+        "参考回答：" + "；".join(note.get("expected_answers", [])) if note.get("expected_answers") else "",
+        "板书：" + note.get("board_notes", "") if note.get("board_notes") else "",
+        "过渡：" + note.get("transition", "") if note.get("transition") else "",
+    ]
+    value = "\n".join(row for row in rows if row)
+    return f"\n\n<!--\n{value}\n-->" if value else ""
+
+
+def _placement_html(placement: dict, asset_name: str) -> str:
+    position = placement.get("position", "right")
+    opacity = placement.get("opacity", 1)
+    style = (
+        "position:absolute;"
+        f"left:{placement.get('x', 10)}%;top:{placement.get('y', 20)}%;"
+        f"width:{placement.get('width', 40)}%;height:{placement.get('height', 60)}%;"
+        f"object-fit:cover;opacity:{opacity};"
+        f"z-index:{0 if position == 'background' else 3};"
+        "border-radius:14px;"
+    )
+    caption = html.escape(placement.get("caption", ""))
+    image = f'<img src="/assets/{html.escape(asset_name)}" style="{style}" />'
+    if not caption or position == "background":
+        return f'<div class="any2ppt-image-layer">{image}</div>'
+    caption_style = (
+        "position:absolute;"
+        f"left:{placement.get('x', 10)}%;"
+        f"top:{min(94, placement.get('y', 20) + placement.get('height', 60) + 1)}%;"
+        f"width:{placement.get('width', 40)}%;"
+        "text-align:center;font-size:12px;opacity:.75;z-index:4;"
+    )
+    return (
+        '<div class="any2ppt-image-layer">'
+        + image
+        + f'<div style="{caption_style}">{caption}</div>'
+        + "</div>"
+    )
+
+
+def _prepare_slidev_job(
+    job_dir: Path,
+    slide_deck: dict,
+    image_records: dict[str, ProjectImage],
+) -> None:
+    public_assets = job_dir / "public" / "assets"
+    public_assets.mkdir(parents=True, exist_ok=True)
+    asset_names: dict[str, str] = {}
+    for image_id, record in image_records.items():
+        suffix = Path(record.storage_path).suffix.lower()
+        asset_name = f"{image_id}{suffix}"
+        shutil.copy2(record.storage_path, public_assets / asset_name)
+        asset_names[image_id] = asset_name
+
+    theme_package = slide_deck.get("theme", "@slidev/theme-default")
+    slides = slide_deck.get("slides", [])
+    frontmatter_rows = [
+        "---",
+        f"theme: {json.dumps(theme_package, ensure_ascii=False)}",
+        f"title: {json.dumps(slide_deck.get('deck_title', '备课课件'), ensure_ascii=False)}",
+        "download: false",
+        "canvasWidth: 1280",
+        "aspectRatio: 16/9",
+    ]
+    if slide_deck.get("theme_config"):
+        frontmatter_rows.append(
+            f"themeConfig: {json.dumps(slide_deck['theme_config'], ensure_ascii=False)}"
+        )
+    if slides:
+        frontmatter_rows.append(
+            f"layout: {json.dumps(slides[0].get('layout', 'default'), ensure_ascii=False)}"
+        )
+    frontmatter_rows.append("---")
+    frontmatter = "\n".join(frontmatter_rows)
+    pages = []
+    for slide in slides:
+        placements = slide.get("images", [])
+        backgrounds = []
+        foregrounds = []
+        for placement in placements:
+            asset_name = asset_names.get(placement.get("image_id", ""))
+            if not asset_name:
+                continue
+            target = backgrounds if placement.get("position") == "background" else foregrounds
+            target.append(_placement_html(placement, asset_name))
+        pages.append(
+            "\n\n".join(backgrounds)
+            + "\n\n"
+            + slide.get("markdown", "")
+            + "\n\n"
+            + "\n\n".join(foregrounds)
+            + _slidev_notes(slide)
+        )
+    document = frontmatter
+    if pages:
+        document += "\n\n" + pages[0]
+    for slide, page in zip(slides[1:], pages[1:]):
+        document += (
+            "\n\n---\n"
+            f"layout: {json.dumps(slide.get('layout', 'default'), ensure_ascii=False)}\n"
+            "---\n\n"
+            + page
+        )
+    (job_dir / "slides.md").write_text(document, "utf-8")
+
+
+def _write_slidev_pptx(
+    path: Path,
+    slide_deck: dict,
+    image_records: dict[str, ProjectImage],
+    project_id: str | None = None,
+) -> None:
+    settings = get_settings()
+    if not settings.slidev_renderer_url:
+        _write_pptx(
+            path,
+            slide_deck,
+            {image_id: Path(record.storage_path) for image_id, record in image_records.items()},
+        )
+        return
+    allowed = {
+        (item["package"], item["version"])
+        for item in theme_catalog()
+    }
+    theme_package = slide_deck.get("theme", "@slidev/theme-default")
+    theme_version = slide_deck.get("theme_version", "0.25.0")
+    if (theme_package, theme_version) not in allowed:
+        raise ValueError("THEME_NOT_ALLOWED")
+
+    job_id = str(uuid.uuid4())
+    job_dir = settings.export_dir.resolve().parent / "render_jobs" / job_id
+    job_dir.mkdir(parents=True, exist_ok=False)
+    try:
+        _prepare_slidev_job(job_dir, slide_deck, image_records)
+        response = httpx.post(
+            f"{settings.slidev_renderer_url.rstrip('/')}/render",
+            json={
+                "job_id": job_id,
+                "project_id": project_id,
+                "theme_package": theme_package,
+                "theme_version": theme_version,
+            },
+            timeout=settings.slidev_renderer_timeout_seconds,
+        )
+        response.raise_for_status()
+        rendered = job_dir / "output.pptx"
+        if not rendered.is_file():
+            raise RuntimeError("SLIDEV_RENDER_OUTPUT_MISSING")
+        shutil.move(rendered, path)
+    finally:
+        shutil.rmtree(job_dir, ignore_errors=True)
 
 
 def _load_versions(db: Session, job: ExportJob) -> dict[str, ArtifactVersion]:
@@ -111,6 +378,35 @@ def create_export(job_id: str) -> None:
 
         versions = _load_versions(db, job)
         latest = {artifact_type: version.content for artifact_type, version in versions.items()}
+        if job.package_type == "pptx":
+            pptx_path = root / f"{job.project_id}_{job.id}.pptx"
+            tmp_pptx = tmp / pptx_path.name
+            image_ids = {
+                placement.get("image_id")
+                for slide in latest["slide_deck"].get("slides", [])
+                for placement in slide.get("images", [])
+                if placement.get("image_id")
+            }
+            image_rows = (
+                db.query(ProjectImage)
+                .filter(
+                    ProjectImage.project_id == job.project_id,
+                    ProjectImage.id.in_(image_ids),
+                )
+                .all()
+                if image_ids
+                else []
+            )
+            image_records = {item.id: item for item in image_rows}
+            if missing_images := sorted(image_ids - image_records.keys()):
+                raise ValueError(f"EXPORT_IMAGES_MISSING: {', '.join(missing_images)}")
+            _write_slidev_pptx(tmp_pptx, latest["slide_deck"], image_records, job.project_id)
+            tmp_pptx.replace(pptx_path)
+            job.selected_versions = {"slide_deck": versions["slide_deck"].id}
+            job.file_path = str(pptx_path)
+            job.status = "succeeded"
+            db.commit()
+            return
 
         output = tmp / "package"
         output.mkdir()

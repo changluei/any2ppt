@@ -1,12 +1,14 @@
-# 面向智慧教育的 AI 备课辅助系统（LessonDeck）
+# 面向智慧教育的 AI 备课辅助系统
 
-面向小学教师的单课时备课工作台：上传教材/课标后建立可追溯知识库，由五类教学 Skills 和可见质量流程生成教学设计、12—18 页课件、逐页讲稿、分层练习，并支持局部修改、版本回滚、教师/学生双包导出。
+面向小学教师的单课时备课工作台：创建项目时先预览并选择 Slidev 模板，上传教材或课标建立可追溯知识库，系统自动完成教学设计、课堂活动、逐页讲解提示、分层练习和质量检查，最终统一生成并导出一份可直接使用的 PPT。
 
 ## 目录
 
-- `frontend/`：Vue 3、TypeScript、Vite、Pinia、Element Plus；五个主页面与三栏工作台。
+- `frontend/`：Vue 3、TypeScript、Vite、Pinia、Element Plus；仅保留“备课项目”和“知识库”两级主导航，项目工作台从具体项目进入。
 - `backend/app/`：FastAPI、SQLAlchemy/MySQL、上传、任务、产物版本、图状态、导出。
-- `backend/app/ai/`：DeepSeek 适配、可追溯检索、五类 Skills、完整生成、质量规则。
+- `backend/app/ai/`：DeepSeek 适配、可追溯检索、内部生成能力与自动质量规则。
+- `backend/app/theme_catalog.json`：只保存经过兼容验证的主题描述、固定版本、预览地址、适用场景和实际版式清单，不保存主题源码。
+- `renderer/`：用户确认创建项目后才从 NPM 下载所选主题并按项目缓存；生成时 AI 遵循该主题的实际版式清单，导出时由 Slidev 渲染 PPTX。
 - `contracts/`：跨模块 JSON Schema 与固定字段。
 - `deploy/`：MySQL 8、后端、前端一键编排。
 - `samples/`：无版权风险的自编演示资料；不包含预生成 AI 答案。
@@ -23,7 +25,7 @@ docker compose --env-file .env -f deploy/docker-compose.yml up --build
 
 3. 打开前端 <http://localhost:5173>，Swagger 为 <http://localhost:8000/docs>，API/数据库诊断为 `/health` 和 `/health/db`。
 
-没有模型密钥时，系统会生成基于用户输入的“规则降级草案”，界面有醒目标识，绝不会冒充 DeepSeek 成功。上传 `samples/公开课例资料.md` 后可查看真实来源位置。需要在已配置密钥的环境中做无费用验收时，设置 `AI_FORCE_FALLBACK=true`。
+没有模型密钥时，系统会生成基于用户输入的规则降级草案，绝不会冒充 DeepSeek 成功。上传 `samples/公开课例资料.md` 后即可测试完整流程。需要在已配置密钥的环境中做无费用验收时，设置 `AI_FORCE_FALLBACK=true`。
 
 停止服务（保留 MySQL 与 Chroma 数据）：
 
@@ -85,4 +87,4 @@ docker compose --env-file .env -f deploy/docker-compose.yml down
 
 ## 当前边界
 
-首版聚焦小学单课时，不提供复杂权限、在线协作、拖拽式 PPT 编辑或扫描 PDF OCR。课件采用 Slidev 兼容 Markdown、安全 iframe 预览和离线 HTML 导出；PDF 可由导出的 HTML 通过浏览器打印生成。
+首版聚焦小学单课时，不提供复杂权限、在线协作或扫描 PDF OCR。工作台支持逐页预览、Markdown 源码直接编辑、实时编译预览和定向调整；保存源码会创建新的课件版本。教师可上传 PNG/JPG/WEBP 图片，并按左侧、右侧、居中、宽图或背景位置放入指定页面。所有教学内容统一汇入 `.pptx` 文件，不再向教师提供独立教案、讲稿、练习包或其他导出产物。

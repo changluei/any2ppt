@@ -46,12 +46,21 @@ def _fallback_outlines(context: LessonContext) -> list[SlideOutline]:
         "发现关键信息", "合作探究", "交流与质疑", "方法梳理", "例题示范",
         "基础练习", "巩固练习", "提高挑战", "易错提醒", "课堂小结", "自我评价",
     ]
+    layouts = context.theme_layouts or ["default"]
     return [
         SlideOutline(
             title=title,
             teaching_stage=("STAGE-1" if index <= 4 else "STAGE-2" if index <= 10 else "STAGE-3" if index <= 14 else "STAGE-4"),
             objective_ids=["OBJ-1"] if index <= 8 else ["OBJ-2"] if index <= 14 else ["OBJ-1", "OBJ-2"],
             purpose=f"围绕“{context.lesson_topic}”形成可观察的学习证据",
+            layout=(
+                "cover" if index == 1 and "cover" in layouts
+                else "section" if index in {5, 11, 15} and "section" in layouts
+                else "fact" if index in {9, 14} and "fact" in layouts
+                else "default" if "default" in layouts
+                else layouts[0]
+            ),
+            visual_intent="使用模板能力突出问题、证据或结论，避免文字铺满页面",
         )
         for index, title in enumerate(titles, 1)
     ]
@@ -73,7 +82,9 @@ def _normalize_outlines(
     for outline in normalized:
         ids = [item for item in outline.objective_ids if item in objective_ids] or default_ids
         stage = outline.teaching_stage if outline.teaching_stage in stage_ids else default_stage
-        safe.append(outline.model_copy(update={"objective_ids": ids, "teaching_stage": stage}))
+        layouts = context.theme_layouts or ["default"]
+        layout = outline.layout if outline.layout in layouts else ("default" if "default" in layouts else layouts[0])
+        safe.append(outline.model_copy(update={"objective_ids": ids, "teaching_stage": stage, "layout": layout}))
     return safe
 
 
@@ -142,6 +153,29 @@ def _allocate_note_minutes(slides: list[SlideOutline], activities: list[Activity
     return minutes
 
 
+def _slide_markdown(context: LessonContext, outline: SlideOutline, has_citations: bool) -> str:
+    evidence_line = "\n\n> 资料依据可在来源面板查看" if has_citations else ""
+    if outline.layout in {"cover", "intro", "lead"}:
+        return f"# {outline.title}\n\n## {context.lesson_topic}\n\n{outline.purpose}"
+    if outline.layout in {"fact", "statement", "bigtype"}:
+        return f"# {outline.title}\n\n## {outline.purpose}"
+    if outline.layout == "quote":
+        return f"# {outline.title}\n\n> {outline.purpose}{evidence_line}"
+    if outline.layout in {"steps", "timeline"}:
+        return (
+            f"# {outline.title}\n\n"
+            f"1. 观察与发现\n2. 表达与解释\n3. 应用与检验\n\n"
+            f"**本页任务：** {outline.purpose}{evidence_line}"
+        )
+    if outline.layout in {"compare", "two-cols", "columns", "panels"}:
+        return (
+            f"# {outline.title}\n\n"
+            f"### 已有认识\n{context.lesson_topic}中的现象或方法\n\n"
+            f"### 新的发现\n{outline.purpose}{evidence_line}"
+        )
+    return f"# {outline.title}\n\n{outline.purpose}\n\n**学习主题：** {context.lesson_topic}{evidence_line}"
+
+
 def _materialize_artifacts(
     context: LessonContext,
     blueprint: LessonBlueprint,
@@ -154,13 +188,13 @@ def _materialize_artifacts(
     slides: list[Slide] = []
     for index, outline in enumerate(outlines, 1):
         citations = blueprint.citations[:2] if index in source_slides else []
-        evidence_line = "\n\n> 资料依据可在来源面板查看" if citations else ""
-        markdown = f"# {outline.title}\n\n{outline.purpose}\n\n**学习主题：** {context.lesson_topic}{evidence_line}"
+        markdown = _slide_markdown(context, outline, bool(citations))
         slides.append(
             Slide(
                 slide_id=f"SLIDE-{index:02d}",
                 order=index,
                 title=outline.title,
+                layout=outline.layout,
                 markdown=markdown,
                 teaching_stage=outline.teaching_stage,
                 objective_ids=outline.objective_ids,

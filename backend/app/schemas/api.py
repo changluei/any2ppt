@@ -17,13 +17,23 @@ class ProjectCreate(BaseModel):
     lesson_count: int = Field(default=1, ge=1, le=8)
     student_profile: str = Field(default="", max_length=2000)
     teacher_requirements: str = Field(default="", max_length=3000)
+    theme_id: str = Field(default="default", min_length=1, max_length=64)
 
 
 class ProjectOut(ProjectCreate, ORMModel):
     id: str
     status: str
+    theme_status: str
     created_at: datetime
     updated_at: datetime
+
+
+class ThemeRecommendationRequest(BaseModel):
+    subject: str = Field(default="", max_length=40)
+    grade: str = Field(default="", max_length=40)
+    lesson_topic: str = Field(default="", max_length=160)
+    student_profile: str = Field(default="", max_length=2000)
+    teacher_requirements: str = Field(default="", max_length=3000)
 
 
 class SourceOut(ORMModel):
@@ -36,6 +46,18 @@ class SourceOut(ORMModel):
     error_message: Optional[str]
     created_at: datetime
     updated_at: datetime
+
+
+class ProjectImageOut(ORMModel):
+    id: str
+    project_id: str
+    original_name: str
+    media_type: str
+    size: int
+    width: int
+    height: int
+    content_url: str
+    created_at: datetime
 
 
 class SearchRequest(BaseModel):
@@ -102,12 +124,26 @@ class RevisionRequest(BaseModel):
     sync_related: bool = False
 
 
+class SlideMarkdownUpdate(BaseModel):
+    base_version_no: int = Field(ge=1)
+    slide_id: str = Field(min_length=1, max_length=100)
+    markdown: str = Field(min_length=1, max_length=20000)
+
+
+class SlideImagePlacementCreate(BaseModel):
+    base_version_no: int = Field(ge=1)
+    slide_id: str = Field(min_length=1, max_length=100)
+    image_id: str = Field(min_length=1, max_length=36)
+    position: Literal["left", "right", "center", "wide", "background"] = "right"
+    caption: str = Field(default="", max_length=300)
+
+
 class HumanDecision(BaseModel):
     decision: Literal["accept", "revise", "cancel"]
 
 
 class ExportCreate(BaseModel):
-    package_type: Literal["teacher", "student"]
+    package_type: Literal["teacher", "student", "pptx"]
     artifact_version_ids: list[str] = Field(default_factory=list, max_length=20)
 
 

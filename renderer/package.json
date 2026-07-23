@@ -1,0 +1,13 @@
+{
+  "name": "any2ppt-slidev-renderer",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@slidev/cli": "52.18.0",
+    "playwright-chromium": "1.61.1"
+  }
+}

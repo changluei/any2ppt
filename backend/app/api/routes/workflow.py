@@ -20,6 +20,7 @@ router = APIRouter(prefix="/api", tags=["workflow"])
 EXPORT_REQUIRED_TYPES = {
     "teacher": {"lesson_plan", "slide_deck", "speaker_notes", "exercise_set"},
     "student": {"slide_deck", "exercise_set"},
+    "pptx": {"slide_deck"},
 }
 
 
@@ -270,4 +271,10 @@ def download_export(job_id: str, project_id: str | None = None, db: Session = De
         raise HTTPException(403, detail={"code": "EXPORT_PATH_BLOCKED", "message": "导出文件路径不合法"})
     if not resolved.is_file():
         raise HTTPException(410, detail={"code": "EXPORT_EXPIRED", "message": "导出文件已过期"})
+    if job.package_type == "pptx":
+        return FileResponse(
+            resolved,
+            media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            filename="备课课件.pptx",
+        )
     return FileResponse(resolved, media_type="application/zip", filename=f"LessonDeck-{job.package_type}.zip")

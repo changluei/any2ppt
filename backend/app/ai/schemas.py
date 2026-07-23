@@ -30,6 +30,12 @@ class LessonContext(BaseModel):
     student_profile: str = ""
     selected_source_ids: list[str] = Field(default_factory=list)
     teacher_requirements: str = ""
+    theme_id: str = "default"
+    theme_name: str = ""
+    theme_description: str = ""
+    theme_layouts: list[str] = Field(default_factory=lambda: ["default"])
+    theme_guidance: str = ""
+    theme_image_strategy: str = ""
 
 
 class TraceInfo(BaseModel):

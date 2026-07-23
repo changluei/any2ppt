@@ -4,7 +4,7 @@ from collections.abc import Iterable
 
 from sqlalchemy.orm import Session
 
-from app.models import AITask, ExportJob, GraphRun, LessonArtifact, Project, SourceDocument
+from app.models import AITask, ExportJob, GraphRun, LessonArtifact, Project, ProjectImage, SourceDocument
 
 
 def list_projects(session: Session) -> list[Project]:
@@ -18,6 +18,7 @@ def get_project(session: Session, project_id: str) -> Project | None:
 def project_delete_blockers(session: Session, project_id: str) -> dict[str, int]:
     return {
         "sources": session.query(SourceDocument).filter(SourceDocument.project_id == project_id).count(),
+        "images": session.query(ProjectImage).filter(ProjectImage.project_id == project_id).count(),
         "tasks": session.query(AITask).filter(AITask.project_id == project_id).count(),
         "artifacts": session.query(LessonArtifact).filter(LessonArtifact.project_id == project_id).count(),
         "graphs": session.query(GraphRun).filter(GraphRun.project_id == project_id).count(),

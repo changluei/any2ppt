@@ -189,7 +189,15 @@ VITE_API_BASE_URL=http://localhost:8000
 
 `GET /api/skills`
 
-返回五类教学 Skill 注册信息，供前端展示 Skill 卡片。
+返回内部教学 Skill 注册信息，供后台编排与调试；普通前端不展示 Skill 卡片。
+
+`GET /api/themes`
+
+返回经过兼容验证的模板描述、固定版本、预览地址和实际版式清单，不返回模板源码。
+
+`POST /api/themes/recommend`
+
+根据学科、年级、课题、学情和教师要求返回一个模板建议。建议只辅助选择，不会下载模板。
 
 ### 6.2 项目
 
@@ -210,9 +218,12 @@ VITE_API_BASE_URL=http://localhost:8000
   "lesson_topic": "水的三态变化",
   "lesson_count": 1,
   "student_profile": "学生能观察简单现象",
-  "teacher_requirements": "强调实验安全"
+  "teacher_requirements": "强调实验安全",
+  "theme_id": "bricks"
 }
 ```
+
+创建接口确认项目后会下载所选固定版本模板，并通过 `theme_status` 返回 `ready` 或 `failed`。失败时可调用 `POST /api/projects/{project_id}/theme/prepare` 重试。
 
 `GET /api/projects/{project_id}`
 
@@ -224,7 +235,7 @@ VITE_API_BASE_URL=http://localhost:8000
 
 `DELETE /api/projects/{project_id}`
 
-只允许删除空项目。如果已有资料、任务或产物，会返回 `PROJECT_NOT_EMPTY` 和 blockers。
+默认只允许删除空项目；已有资料、任务或产物时返回 `PROJECT_NOT_EMPTY` 和 blockers。用户明确确认后可传 `force=true`，同步删除项目数据、上传文件、导出文件、向量索引和主题缓存；正在生成的项目仍会返回 `PROJECT_BUSY`。
 
 ### 6.3 资料与检索
 

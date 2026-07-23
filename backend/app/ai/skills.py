@@ -46,6 +46,8 @@ class SlideOutline(BaseModel):
     teaching_stage: str
     objective_ids: list[str] = Field(default_factory=list)
     purpose: str
+    layout: str = "default"
+    visual_intent: str = ""
 
 
 class SlideNarrativeOutput(BaseModel):
@@ -226,7 +228,11 @@ class SlideNarrativeSkill(TeachingSkill):
     )
     output_model = SlideNarrativeOutput
     query_template = "{grade}{subject} {topic} 教学材料 课堂呈现 例题"
-    instructions = "规划 12—18 页，每页聚焦一个教学目的，避免大段文字。"
+    instructions = (
+        "规划 12—18 页，每页聚焦一个教学目的，避免大段文字。"
+        "必须结合课程上下文中的 theme_layouts、theme_guidance 和 theme_image_strategy 选择版式；"
+        "layout 只能使用 theme_layouts 中的值，并通过 visual_intent 说明该页的视觉重点。"
+    )
 
     def fallback(self, request: SkillRequest, evidence: EvidenceSet) -> BaseModel:
         titles = [
@@ -234,12 +240,22 @@ class SlideNarrativeSkill(TeachingSkill):
             "发现关键信息", "合作探究", "交流与质疑", "方法梳理", "例题示范",
             "基础练习", "巩固练习", "提高挑战", "易错提醒", "课堂小结", "自我评价",
         ]
+        layouts = request.context.theme_layouts or ["default"]
         slides = [
             SlideOutline(
                 title=title,
                 teaching_stage=("STAGE-1" if index <= 4 else "STAGE-2" if index <= 10 else "STAGE-3" if index <= 14 else "STAGE-4"),
                 objective_ids=["OBJ-1"] if index <= 8 else ["OBJ-2"] if index <= 14 else ["OBJ-1", "OBJ-2"],
                 purpose="引导学生观察、表达、应用并形成可评价的学习证据",
+                layout=(
+                    "cover" if index == 1 and "cover" in layouts
+                    else "section" if index in {5, 11, 15} and "section" in layouts
+                    else "fact" if index in {9, 14} and "fact" in layouts
+                    else "quote" if index == 8 and "quote" in layouts
+                    else "default" if "default" in layouts
+                    else layouts[0]
+                ),
+                visual_intent="突出本页核心任务，控制文字数量并形成清晰视觉层级",
             )
             for index, title in enumerate(titles, 1)
         ]
