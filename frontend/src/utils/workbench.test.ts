@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ProjectInput, Task } from '../types'
-import { canRetryTask, citationAvailable, currentTaskId, groupExercises, safeSlideHtml, shouldPoll, showExerciseAnswers, taskErrorText, totalMinutes, validateProject, workbenchPath } from './workbench'
+import { canExport, canRetryTask, citationAvailable, currentTaskId, elapsedText, exportProgress, groupExercises, issueTargetRoute, safeSlideHtml, shouldPoll, showExerciseAnswers, taskErrorText, totalMinutes, validateProject, workbenchPath } from './workbench'
 
 const form: ProjectInput = {
   name: '测试项目', subject: '语文', grade: '三年级', textbook_version: '',
@@ -21,6 +21,22 @@ describe('day 3 workbench helpers', () => {
     const task = (status: Task['status']) => ({ status }) as Task
     expect(shouldPoll([task('running')])).toBe(true)
     expect(shouldPoll([task('succeeded'), task('failed')])).toBe(false)
+  })
+})
+
+describe('day 6 workflow helpers', () => {
+  it('maps issue targets back to the workbench', () => {
+    expect(issueTargetRoute('p1', 'SLIDE-03')).toEqual({ path: '/workbench/p1', query: { target: 'SLIDE-03' } })
+  })
+
+  it('allows export only after confirmation', () => {
+    expect(canExport('awaiting_confirmation')).toBe(false)
+    expect(canExport('succeeded')).toBe(true)
+    expect(exportProgress('running')).toBe(60)
+  })
+
+  it('formats real elapsed time', () => {
+    expect(elapsedText('2026-01-01T00:00:00Z', '2026-01-01T00:00:05Z')).toBe('5 秒')
   })
 })
 

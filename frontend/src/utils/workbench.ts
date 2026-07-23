@@ -34,3 +34,12 @@ export function safeSlideHtml(markdown = '') {
   const text = markdown.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
   return `<!doctype html><meta charset="utf-8"><style>body{margin:0;padding:36px;background:#102444;color:white;font:20px/1.7 sans-serif}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style><pre>${text}</pre>`
 }
+
+export const issueTargetRoute = (projectId: string, targetId: string) => ({ path: `/workbench/${projectId}`, query: { target: targetId } })
+export const canExport = (graphStatus: string) => graphStatus === 'succeeded'
+export const exportProgress = (status: string) => ({ pending: 20, running: 60, succeeded: 100, failed: 0 })[status] ?? 0
+export function elapsedText(start?: string, end?: string) {
+  if (!start) return '暂无耗时'
+  const seconds = Math.max(0, Math.round((new Date(end || Date.now()).getTime() - new Date(start).getTime()) / 1000))
+  return `${seconds} 秒`
+}

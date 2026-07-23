@@ -17,9 +17,12 @@ export const api = {
   versions: (id:string) => http.get<Artifact[]>(`/api/artifacts/${id}/versions`).then(r=>r.data),
   rollback: (id:string,v:number) => http.post<Artifact>(`/api/artifacts/${id}/rollback/${v}`).then(r=>r.data),
   graph: (id:string) => http.get<GraphState>(`/api/projects/${id}/graph`).then(r=>r.data),
-  confirmGraph: (id:string,decision:string) => http.post(`/api/graphs/${id}/confirm`,{decision}).then(r=>r.data),
-  createExport: (id:string,package_type:string) => http.post<ExportJob>(`/api/projects/${id}/exports`,{package_type}).then(r=>r.data),
+  startGraph: (id:string,taskId?:string) => http.post<GraphState>(`/api/projects/${id}/graph/runs`,{task_id:taskId}).then(r=>r.data),
+  resumeGraph: (id:string) => http.post<GraphState>(`/api/graphs/${id}/resume`).then(r=>r.data),
+  cancelGraph: (id:string) => http.post<GraphState>(`/api/graphs/${id}/cancel`).then(r=>r.data),
+  confirmGraph: (id:string,decision:string) => http.post<{status:string;decision:string}>(`/api/graphs/${id}/confirm`,{decision}).then(r=>r.data),
+  createExport: (id:string,package_type:string,artifact_version_ids:string[]=[]) => http.post<ExportJob>(`/api/projects/${id}/exports`,{package_type,artifact_version_ids}).then(r=>r.data),
   exportStatus: (id:string) => http.get<ExportJob>(`/api/exports/${id}`).then(r=>r.data),
-  downloadUrl: (id:string) => `${http.defaults.baseURL}/api/exports/${id}/download`,
+  downloadExport: (id:string) => http.get<Blob>(`/api/exports/${id}/download`,{responseType:'blob'}).then(r=>({blob:r.data,filename:/filename="?([^";]+)"?/i.exec(r.headers['content-disposition']||'')?.[1]||'LessonDeck.zip'})),
 }
 

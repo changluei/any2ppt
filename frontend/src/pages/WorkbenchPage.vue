@@ -86,6 +86,10 @@ async function load() {
     requirements.value = project.value.teacher_requirements
     selectedSourceIds.value = readySources.value.map(({ id }) => id)
     selectedSlide.value ||= deck.value?.content.slides?.[0]?.slide_id || ''
+    const target = String(route.query.target || '')
+    if (target.startsWith('SLIDE-')) { activeType.value = 'slide_deck'; selectedSlide.value = target }
+    else if (target.startsWith('EX-')) { activeType.value = 'exercise_set'; selectedSlide.value = target }
+    else if (target.startsWith('OBJ-') || target === 'lesson_plan') activeType.value = 'lesson_plan'
     await loadVersions()
     schedulePolling()
   } catch (error) {
