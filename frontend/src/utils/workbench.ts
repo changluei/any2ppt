@@ -1,4 +1,4 @@
-import type { ProjectInput, Task } from '../types'
+import type { Exercise, LessonStage, ProjectInput, Task } from '../types'
 
 export function validateProject(form: ProjectInput): string | null {
   if (!form.name.trim()) return '请填写项目名称'
@@ -24,3 +24,13 @@ export const canRetryTask = ({ status }: Task) => status === 'failed' || status 
 export const currentTaskId = (tasks: Task[], saved = '') =>
   tasks.find(({ id }) => id === saved)?.id || tasks.find(({ status }) => status === 'pending' || status === 'running')?.id || tasks[0]?.id || ''
 export const citationAvailable = (sourceId: string, sourceIds: string[]) => sourceIds.includes(sourceId)
+
+export const totalMinutes = (stages: LessonStage[] = []) => stages.reduce((sum, item) => sum + item.time_minutes, 0)
+export const showExerciseAnswers = (view: string) => view === '教师视图'
+export const groupExercises = (items: Exercise[] = []) =>
+  ['基础', '巩固', '提高'].map((level) => ({ level, items: items.filter((item) => item.level === level) }))
+
+export function safeSlideHtml(markdown = '') {
+  const text = markdown.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+  return `<!doctype html><meta charset="utf-8"><style>body{margin:0;padding:36px;background:#102444;color:white;font:20px/1.7 sans-serif}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style><pre>${text}</pre>`
+}
