@@ -7,13 +7,13 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from app.ai.graph import initial_node_state
+from app.ai.graph import NODES
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.models import AITask, ArtifactVersion, ExportJob, GraphRun, LessonArtifact, Project
 from app.schemas.api import ExportCreate, GraphRunOut, GraphStartRequest, HumanDecision
 from app.services.export_service import create_export
-from app.services.graph_service import execute_graph_run, finalize_graph, repair_graph_run
+from app.services.graph_service import create_graph_run, decide_graph, execute_graph_run, resume_graph_run
 
 router = APIRouter(prefix="/api", tags=["workflow"])
 
@@ -104,7 +104,12 @@ def graph_or_404(db: Session, graph_id: str) -> GraphRun:
 
 
 @router.post("/projects/{project_id}/graph/runs", response_model=GraphRunOut, status_code=202)
-def start_graph(project_id: str, data: GraphStartRequest, background: BackgroundTasks, db: Session = Depends(get_db)):
+def start_graph(
+    project_id: str,
+    data: GraphStartRequest,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(404, detail={"code": "PROJECT_NOT_FOUND", "message": "项目不存在"})
@@ -117,23 +122,18 @@ def start_graph(project_id: str, data: GraphStartRequest, background: Background
         task = db.query(AITask).filter_by(project_id=project_id).order_by(AITask.created_at.desc()).first()
     if not task:
         raise HTTPException(409, detail={"code": "TASK_REQUIRED", "message": "需要先创建一个任务"})
-    graph = GraphRun(
-        project_id=project_id,
-        task_id=task.id,
+    graph = create_graph_run(
+        db,
+        project,
+        task,
         thread_id=data.thread_id or task.trace_id or str(uuid.uuid4()),
         checkpoint_ref=data.checkpoint_ref or f"task:{task.id}",
-        attempt=1,
-        status="running",
-        current_node="analyze_sources",
-        nodes=initial_node_state(),
-        issues=[],
-        state_snapshot={"task_id": task.id, "project_id": project_id},
     )
-    db.add(graph)
+    graph.status = "running"
     db.commit()
-    db.refresh(graph)
-    background.add_task(execute_graph_run, graph.id)
-    return graph_payload(graph)
+    payload = graph_payload(graph)
+    background.add_task(execute_graph_run, graph.id, resume_from="analyze_sources")
+    return payload
 
 
 @router.get("/projects/{project_id}/graph")
@@ -154,6 +154,15 @@ def cancel_graph(graph_id: str, db: Session = Depends(get_db)):
         return graph_payload(graph)
     graph.status = "cancelled"
     graph.current_node = "cancelled"
+    state = dict(graph.state_snapshot or {})
+    state["resume_from"] = state.get("current_node") or "analyze_sources"
+    state["current_node"] = "cancelled"
+    state["cancelled"] = True
+    graph.state_snapshot = state
+    task = db.get(AITask, graph.task_id)
+    if task and task.status in {"pending", "running"}:
+        task.status = "cancelled"
+        task.stage = "用户已取消"
     db.commit()
     db.refresh(graph)
     return graph_payload(graph)
@@ -166,30 +175,49 @@ def resume_graph(graph_id: str, background: BackgroundTasks, db: Session = Depen
         raise HTTPException(409, detail={"code": "GRAPH_CONFLICT", "message": "当前流程不需要恢复"})
     graph.attempt += 1
     graph.status = "running"
-    graph.current_node = graph.current_node or "analyze_sources"
+    state = dict(graph.state_snapshot or {})
+    resume_from = state.get("resume_from") or state.get("current_node") or "analyze_sources"
+    if resume_from not in NODES or resume_from in {"human_confirm", "finalize"}:
+        resume_from = "analyze_sources"
+    state.update(
+        {
+            "resume_from": resume_from,
+            "current_node": resume_from,
+            "cancelled": False,
+            "failed": False,
+            "error": "",
+            "human_decision": None,
+        }
+    )
+    graph.current_node = resume_from
+    graph.human_decision = None
+    graph.state_snapshot = state
     db.commit()
     db.refresh(graph)
-    background.add_task(execute_graph_run, graph.id)
-    return graph_payload(graph)
+    payload = graph_payload(graph)
+    background.add_task(resume_graph_run, graph.id, resume_from=resume_from)
+    return payload
 
 
 @router.post("/graphs/{graph_id}/confirm")
-def confirm_graph(graph_id: str, data: HumanDecision, background: BackgroundTasks, db: Session = Depends(get_db)):
+def confirm_graph(graph_id: str, data: HumanDecision, db: Session = Depends(get_db)):
     graph = graph_or_404(db, graph_id)
-    if graph.human_decision == data.decision and data.decision != "revise":
-        return {"status": graph.status, "decision": graph.human_decision}
-    if data.decision == "revise":
-        graph.human_decision = data.decision
-        graph.status = "running"
-        graph.current_node = (graph.state_snapshot or {}).get("repair_scope") or "review_quality"
-        db.commit()
-        background.add_task(repair_graph_run, graph.id)
-    else:
-        graph_id_value = graph.id
-        db.close()
-        changed = finalize_graph(graph_id_value, data.decision)
-        return {"status": changed.status, "decision": changed.human_decision}
-    return {"status": graph.status, "decision": graph.human_decision}
+    if graph.human_decision == data.decision and graph.status in {"succeeded", "cancelled"}:
+        return graph_payload(graph)
+    if graph.status not in {"awaiting_confirmation", "needs_revision"}:
+        raise HTTPException(409, detail={"code": "GRAPH_CONFLICT", "message": "当前流程不在人工确认节点"})
+    graph.human_decision = data.decision
+    graph.status = "running"
+    state = dict(graph.state_snapshot or {})
+    state["human_decision"] = data.decision
+    state["resume_from"] = "human_confirm"
+    state["cancelled"] = False
+    graph.state_snapshot = state
+    db.commit()
+    decide_graph(graph.id, data.decision)
+    db.expire_all()
+    graph = graph_or_404(db, graph_id)
+    return graph_payload(graph)
 
 
 @router.post("/projects/{project_id}/exports", status_code=202)

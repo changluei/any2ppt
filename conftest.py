@@ -19,6 +19,7 @@ for name in ("TMPDIR", "TEMP", "TMP"):
     os.environ.setdefault(name, str(TMP_ROOT))
 
 os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
+os.environ.setdefault("DEEPSEEK_API_KEY", " ")
 os.environ.setdefault("CHROMA_PERSIST_DIR", str(TMP_ROOT / "chroma"))
 os.environ.setdefault("UPLOAD_DIR", str(TMP_ROOT / "uploads"))
 os.environ.setdefault("EXPORT_DIR", str(TMP_ROOT / "exports"))

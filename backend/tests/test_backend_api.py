@@ -185,6 +185,28 @@ def test_source_task_graph_and_export_flow(client):
     assert archive.read("slides.md").decode("utf-8").startswith("---\ntheme:")
     assert "版本清单.json" in archive.namelist()
 
+    extra_graph = client.post(
+        f"/api/projects/{project['id']}/graph/runs",
+        json={"task_id": task_id, "thread_id": "checkpoint-resume-test"},
+    )
+    assert extra_graph.status_code == 202, extra_graph.text
+    extra_graph_id = extra_graph.json()["id"]
+    cancelled = client.post(f"/api/graphs/{extra_graph_id}/cancel")
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+    assert cancelled.json()["state_snapshot"]["cancelled"] is True
+
+    resumed = client.post(f"/api/graphs/{extra_graph_id}/resume")
+    assert resumed.status_code == 200
+    assert resumed.json()["status"] == "running"
+    resumed_graph = client.get(f"/api/projects/{project['id']}/graph")
+    assert resumed_graph.status_code == 200
+    assert resumed_graph.json()["id"] == extra_graph_id
+    assert resumed_graph.json()["status"] == "awaiting_confirmation"
+    assert resumed_graph.json()["state_snapshot"]["cancelled"] is False
+    resumed_nodes = {item["node_id"]: item for item in resumed_graph.json()["nodes"]}
+    assert resumed_nodes["analyze_sources"]["attempt"] >= 2
+
 
 def test_independent_skill_result_and_unknown_type(client):
     project = create_project(client)

@@ -76,8 +76,67 @@ def test_compiled_langgraph_pauses_before_human_confirmation(valid_artifacts):
     graph = build_langgraph()
     assert graph is not None
     result = graph.invoke({"artifacts": valid_artifacts, "attempts": {}, "events": [], "trace_id": "graph-trace"})
-    assert result["current_node"] == "review_quality"
+    assert result["current_node"] == "human_confirm"
     assert any(event["node_id"] == "review_quality" for event in result["events"])
+    assert result["events"][-1]["status"] == "awaiting_confirmation"
+
+
+def test_compiled_langgraph_resumes_from_human_checkpoint(valid_artifacts):
+    graph = build_langgraph()
+    paused = graph.invoke(
+        {"artifacts": valid_artifacts, "attempts": {}, "events": [], "trace_id": "resume-trace"}
+    )
+    resumed = graph.invoke(
+        {
+            **paused,
+            "resume_from": "human_confirm",
+            "human_decision": "accept",
+        }
+    )
+    assert resumed["current_node"] == "finalize"
+    assert any(
+        event["node_id"] == "finalize" and event["status"] == "succeeded"
+        for event in resumed["events"]
+    )
+
+
+def test_human_revision_only_runs_targeted_slide_branch(valid_artifacts):
+    calls = {"design_lesson": 0, "generate_slides": 0, "generate_notes_exercises": 0}
+
+    def count(node):
+        def handler(state):
+            calls[node] += 1
+            if node == "generate_slides":
+                return {"artifacts": state["artifacts"]}
+            return {}
+
+        return handler
+
+    graph = build_langgraph(
+        {
+            "design_lesson": count("design_lesson"),
+            "generate_slides": count("generate_slides"),
+            "generate_notes_exercises": count("generate_notes_exercises"),
+            "review_quality": lambda _state: {"issues": []},
+        }
+    )
+    result = graph.invoke(
+        {
+            "artifacts": valid_artifacts,
+            "attempts": {"generate_slides": 1},
+            "events": [],
+            "trace_id": "targeted-repair",
+            "resume_from": "human_confirm",
+            "human_decision": "revise",
+            "repair_scope": "slides",
+        }
+    )
+    assert result["current_node"] == "human_confirm"
+    assert calls == {
+        "design_lesson": 0,
+        "generate_slides": 1,
+        "generate_notes_exercises": 0,
+    }
 
 
 def test_node_exception_is_bounded_and_sent_to_human(valid_artifacts):

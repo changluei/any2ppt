@@ -21,6 +21,7 @@ from .schemas import (
     Objective,
     SkillRequest,
     Slide,
+    SkillResponse,
     SpeakerNote,
     TraceInfo,
 )
@@ -206,17 +207,33 @@ def _materialize_artifacts(
     return artifacts
 
 
-def build_lesson_blueprint(
+def merge_blueprint_responses(
+    blueprint: LessonBlueprint,
+    responses: list[SkillResponse],
+) -> LessonBlueprint:
+    """Merge citations and warnings produced by later graph nodes."""
+    merged = blueprint.model_copy(deep=True)
+    merged.citations = _dedupe_citations(
+        list(merged.citations) + [citation for response in responses for citation in response.citations]
+    )
+    merged.warnings = list(
+        dict.fromkeys(
+            list(merged.warnings) + [warning for response in responses for warning in response.warnings]
+        )
+    )
+    return merged
+
+
+def design_lesson_blueprint(
     context: LessonContext,
     *,
     llm=None,
     store: ProjectVectorStore | None = None,
     trace_id: str | None = None,
-) -> tuple[LessonBlueprint, list[SlideOutline], list[Exercise], list, bool]:
+) -> tuple[LessonBlueprint, list[SkillResponse]]:
+    """Run only the standard/objective/activity skills used by the design node."""
     vector_store = store or ProjectVectorStore()
     run_trace = trace_id or str(uuid.uuid4())
-    responses = []
-
     standard = run_skill(
         "course_standard_interpretation",
         SkillRequest(context=context),
@@ -224,7 +241,6 @@ def build_lesson_blueprint(
         store=vector_store,
         trace_id=run_trace,
     )
-    responses.append(standard)
     objectives_response = run_skill(
         "learning_objectives",
         SkillRequest(context=context, parameters={"course_standard": standard.result}),
@@ -232,7 +248,6 @@ def build_lesson_blueprint(
         store=vector_store,
         trace_id=run_trace,
     )
-    responses.append(objectives_response)
     activities_response = run_skill(
         "teaching_activities",
         SkillRequest(context=context, parameters={"objectives": objectives_response.result["objectives"]}),
@@ -240,13 +255,11 @@ def build_lesson_blueprint(
         store=vector_store,
         trace_id=run_trace,
     )
-    responses.append(activities_response)
-
+    responses = [standard, objectives_response, activities_response]
     objectives = [Objective.model_validate(item) for item in objectives_response.result["objectives"]]
     activities = [Activity.model_validate(item) for item in activities_response.result["activities"]]
     assessments = [Assessment.model_validate(item) for item in activities_response.result["assessments"]]
     activities, assessments, links_changed = _normalize_blueprint_links(objectives, activities, assessments)
-    citations = _dedupe_citations([citation for response in responses for citation in response.citations])
     warnings = list(dict.fromkeys(warning for response in responses for warning in response.warnings))
     if links_changed:
         warnings.append("已按教学目标自动修正活动与评价中的目标编号关联，请教师复核。")
@@ -260,30 +273,96 @@ def build_lesson_blueprint(
         activities=activities,
         assessments=assessments,
         teaching_strategies=["问题驱动", "合作探究", "分层评价"],
-        citations=citations,
+        citations=_dedupe_citations([citation for response in responses for citation in response.citations]),
         warnings=warnings,
     )
+    return blueprint, responses
 
-    slide_response = run_skill(
+
+def generate_slide_outlines(
+    context: LessonContext,
+    blueprint: LessonBlueprint,
+    *,
+    llm=None,
+    store: ProjectVectorStore | None = None,
+    trace_id: str | None = None,
+) -> tuple[list[SlideOutline], SkillResponse]:
+    """Run the slide skill without generating notes or exercises."""
+    response = run_skill(
         "slide_narrative",
         SkillRequest(context=context, parameters={"blueprint": blueprint.model_dump(mode="json")}),
+        llm=llm,
+        store=store or ProjectVectorStore(),
+        trace_id=trace_id or str(uuid.uuid4()),
+    )
+    return [SlideOutline.model_validate(item) for item in response.result["slides"]], response
+
+
+def generate_exercises(
+    context: LessonContext,
+    blueprint: LessonBlueprint,
+    *,
+    llm=None,
+    store: ProjectVectorStore | None = None,
+    trace_id: str | None = None,
+) -> tuple[list[Exercise], SkillResponse, bool]:
+    """Run the exercise skill and normalize objective coverage."""
+    response = run_skill(
+        "exercise_assessment",
+        SkillRequest(
+            context=context,
+            parameters={"objectives": [item.model_dump(mode="json") for item in blueprint.objectives]},
+        ),
+        llm=llm,
+        store=store or ProjectVectorStore(),
+        trace_id=trace_id or str(uuid.uuid4()),
+    )
+    exercises = [Exercise.model_validate(item) for item in response.result["exercises"]]
+    exercises, links_changed = _normalize_exercise_links(exercises, blueprint.objectives)
+    return exercises, response, links_changed
+
+
+def materialize_lesson_artifacts(
+    context: LessonContext,
+    blueprint: LessonBlueprint,
+    outlines: list[SlideOutline],
+    exercises: list[Exercise],
+) -> dict[str, dict[str, Any]]:
+    """Public graph-node adapter for deriving the four aligned artifacts."""
+    return _materialize_artifacts(context, blueprint, outlines, exercises)
+
+
+def build_lesson_blueprint(
+    context: LessonContext,
+    *,
+    llm=None,
+    store: ProjectVectorStore | None = None,
+    trace_id: str | None = None,
+) -> tuple[LessonBlueprint, list[SlideOutline], list[Exercise], list, bool]:
+    vector_store = store or ProjectVectorStore()
+    run_trace = trace_id or str(uuid.uuid4())
+    blueprint, responses = design_lesson_blueprint(
+        context,
         llm=llm,
         store=vector_store,
         trace_id=run_trace,
     )
-    exercise_response = run_skill(
-        "exercise_assessment",
-        SkillRequest(context=context, parameters={"objectives": [item.model_dump() for item in objectives]}),
+    outlines, slide_response = generate_slide_outlines(
+        context,
+        blueprint,
+        llm=llm,
+        store=vector_store,
+        trace_id=run_trace,
+    )
+    exercises, exercise_response, exercise_links_changed = generate_exercises(
+        context,
+        blueprint,
         llm=llm,
         store=vector_store,
         trace_id=run_trace,
     )
     responses.extend([slide_response, exercise_response])
-    blueprint.citations = _dedupe_citations([citation for response in responses for citation in response.citations])
-    blueprint.warnings = list(dict.fromkeys(warning for response in responses for warning in response.warnings))
-    outlines = [SlideOutline.model_validate(item) for item in slide_response.result["slides"]]
-    exercises = [Exercise.model_validate(item) for item in exercise_response.result["exercises"]]
-    exercises, exercise_links_changed = _normalize_exercise_links(exercises, objectives)
+    blueprint = merge_blueprint_responses(blueprint, [slide_response, exercise_response])
     if exercise_links_changed:
         blueprint.warnings.append("已按教学目标自动修正练习中的目标编号关联，请教师复核。")
     return blueprint, outlines, exercises, responses, any(response.degraded for response in responses)

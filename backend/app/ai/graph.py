@@ -22,7 +22,7 @@ MAX_REPAIR_ATTEMPTS = 2
 
 
 class CheckpointAdapter(Protocol):
-    """Member 3 can implement this protocol with the existing MySQL GraphRun model."""
+    """Persistence contract implemented by GraphRunCheckpointStore in the service layer."""
 
     def load(self, project_id: str, trace_id: str) -> dict[str, Any] | None: ...
 
@@ -58,6 +58,13 @@ class LessonState(TypedDict, total=False):
     repair_scope: str
     failed: bool
     error: str
+    resume_from: str | None
+    slide_outlines: list[dict[str, Any]]
+    exercises: list[dict[str, Any]]
+    skill_traces: list[dict[str, Any]]
+    model: str
+    degraded: bool
+    persisted_artifact_hash: str
 
 
 def _issue(issue_type: str, target_id: str, severity: str, suggestion: str) -> dict:
@@ -240,15 +247,22 @@ def route_after_human(state: LessonState) -> str:
             "slides": "generate_slides",
             "notes_exercises": "generate_notes_exercises",
         }.get(scope, "design_lesson")
-    return "cancelled"
+    if decision == "cancel":
+        return "cancelled"
+    return "paused"
 
 
 def _event(state: LessonState, node: str, status: str = "succeeded") -> list[dict[str, Any]]:
     return state.get("events", []) + [{"node_id": node, "status": status, "trace_id": state.get("trace_id", "")}]
 
 
-def build_langgraph(node_handlers: dict[str, Callable[[LessonState], dict[str, Any]]] | None = None):
-    """Build the real conditional graph; handlers let the service inject generation/checkpoint work."""
+def build_langgraph(
+    node_handlers: dict[str, Callable[[LessonState], dict[str, Any]]] | None = None,
+    *,
+    on_node_event: Callable[[str, str, dict[str, Any]], None] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+):
+    """Build the conditional graph with resumable entry and persistence hooks."""
     try:
         from langgraph.graph import END, StateGraph
     except ImportError:
@@ -259,38 +273,76 @@ def build_langgraph(node_handlers: dict[str, Callable[[LessonState], dict[str, A
 
     def make_node(node_id: str):
         def execute(state: LessonState) -> dict[str, Any]:
-            if state.get("cancelled"):
-                return {"current_node": node_id, "events": _event(state, node_id, "cancelled")}
+            running_state = dict(state)
+            if cancel_check and cancel_check():
+                running_state["cancelled"] = True
+            running_state["current_node"] = node_id
+            running_state["events"] = _event(state, node_id, "running")
+            if on_node_event:
+                on_node_event(node_id, "running", running_state)
+            if running_state.get("cancelled"):
+                result = {
+                    "cancelled": True,
+                    "current_node": node_id,
+                    "events": _event(running_state, node_id, "cancelled"),
+                    "resume_from": None,
+                }
+                if on_node_event:
+                    snapshot = dict(running_state)
+                    snapshot.update(result)
+                    on_node_event(node_id, "cancelled", snapshot)
+                return result
             try:
-                result = dict(handlers[node_id](state)) if node_id in handlers else {}
+                result = dict(handlers[node_id](running_state)) if node_id in handlers else {}
             except Exception as exc:
                 result = {
                     "failed": True,
                     "error": str(exc)[:500],
                     "repair_scope": "human",
                     "issues": [_issue("node_exception", node_id, "fail", "节点执行失败，请重试或转人工确认")],
-                    "warnings": state.get("warnings", []) + [f"{node_id} 执行失败，流程已停止自动返修。"],
-                    "events": _event(state, node_id, "failed"),
+                    "warnings": running_state.get("warnings", []) + [f"{node_id} 执行失败，流程已停止自动返修。"],
                 }
-            attempts = dict(state.get("attempts", {}))
+            attempts = dict(running_state.get("attempts", {}))
             if node_id in {"design_lesson", "generate_slides", "generate_notes_exercises"}:
                 attempts[node_id] = attempts.get(node_id, 0) + 1
+                if running_state.get("human_decision") == "revise":
+                    result.setdefault("human_decision", None)
             result.setdefault("attempts", attempts)
             result.setdefault("current_node", node_id)
-            result.setdefault("events", _event(state, node_id))
+            result.setdefault("resume_from", None)
             if node_id == "review_quality":
-                issues = result.get("issues") or state.get("issues") or review_artifacts(result.get("artifacts", state.get("artifacts", {})))
+                issues = (
+                    result["issues"]
+                    if "issues" in result
+                    else running_state.get("issues")
+                    or review_artifacts(result.get("artifacts", running_state.get("artifacts", {})))
+                )
                 result["issues"] = issues
                 result["repair_scope"] = _repair_scope(issues)
-            if node_id == "human_confirm" and not state.get("human_decision"):
-                result["events"] = _event(state, node_id, "awaiting_confirmation")
+            status = (
+                "cancelled"
+                if result.get("cancelled")
+                else "failed"
+                if result.get("failed")
+                else "succeeded"
+            )
+            if node_id == "human_confirm" and not running_state.get("human_decision"):
+                status = "awaiting_confirmation"
+            result["events"] = _event(running_state, node_id, status)
+            if on_node_event:
+                snapshot = dict(running_state)
+                snapshot.update(result)
+                on_node_event(node_id, status, snapshot)
             return result
 
         return execute
 
     for node_id in NODES:
         builder.add_node(node_id, make_node(node_id))
-    builder.set_entry_point("analyze_sources")
+    builder.set_conditional_entry_point(
+        lambda state: state.get("resume_from") if state.get("resume_from") in NODES else "analyze_sources",
+        {node_id: node_id for node_id in NODES},
+    )
     builder.add_conditional_edges(
         "analyze_sources",
         lambda state: _continue_after_step(state, "design_lesson"),
@@ -331,7 +383,8 @@ def build_langgraph(node_handlers: dict[str, Callable[[LessonState], dict[str, A
             "generate_notes_exercises": "generate_notes_exercises",
             "finalize": "finalize",
             "cancelled": END,
+            "paused": END,
         },
     )
     builder.add_edge("finalize", END)
-    return builder.compile(interrupt_before=["human_confirm"])
+    return builder.compile()

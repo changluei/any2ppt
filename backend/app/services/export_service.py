@@ -52,10 +52,10 @@ def _write_slides(output: Path, slide_deck: dict) -> None:
         "download: false\n"
         "---"
     )
-    (output / "slides.md").write_text(
-        frontmatter + "\n\n" + "\n\n---\n\n".join(slide.get("markdown", "") for slide in slides),
-        "utf-8",
+    slidev_source = frontmatter + "\n\n" + "\n\n---\n\n".join(
+        slide.get("markdown", "") for slide in slides
     )
+    (output / "slides.md").write_bytes(slidev_source.encode("utf-8"))
 
     def render_markdown(source: str) -> str:
         lines = []

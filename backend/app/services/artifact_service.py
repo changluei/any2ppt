@@ -107,6 +107,12 @@ def run_generation_task(task_id: str) -> None:
     if not task or task.status == "cancelled":
         db.close()
         return
+    if task.type == "full_lesson":
+        db.close()
+        from app.services.graph_service import start_task_graph
+
+        start_task_graph(task_id)
+        return
     try:
         task.status = "running"
         task.stage = "资料检索"
