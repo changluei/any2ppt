@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ProjectInput, Task } from '../types'
-import { canExport, canRetryTask, citationAvailable, currentTaskId, elapsedText, exportProgress, groupExercises, issueTargetRoute, safeSlideHtml, shouldPoll, showExerciseAnswers, taskErrorText, totalMinutes, validateProject, workbenchPath } from './workbench'
+import { listData, objectData } from '../api/http'
+import { canExport, canRetryTask, citationAvailable, currentTaskId, elapsedText, exportProgress, groupExercises, httpStatusText, issueTargetRoute, safeSlideHtml, shouldPoll, showExerciseAnswers, taskErrorText, totalMinutes, validateProject, workbenchPath } from './workbench'
 
 const form: ProjectInput = {
   name: '测试项目', subject: '语文', grade: '三年级', textbook_version: '',
@@ -21,6 +22,19 @@ describe('day 3 workbench helpers', () => {
     const task = (status: Task['status']) => ({ status }) as Task
     expect(shouldPoll([task('running')])).toBe(true)
     expect(shouldPoll([task('succeeded'), task('failed')])).toBe(false)
+  })
+})
+
+describe('day 7 error handling', () => {
+  it('provides readable common HTTP errors', () => {
+    expect(httpStatusText(404)).toContain('不存在')
+    expect(httpStatusText(409)).toContain('刷新')
+    expect(httpStatusText(500)).toContain('服务器')
+  })
+
+  it('rejects a page returned in place of API data', () => {
+    expect(() => listData('<html>')).toThrow('VITE_API_BASE_URL')
+    expect(() => objectData([])).toThrow('VITE_API_BASE_URL')
   })
 })
 
