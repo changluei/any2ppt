@@ -139,10 +139,28 @@ export type Artifact = {
 
 export type GraphState = {
   id?: string
+  project_id?: string
+  task_id?: string
+  thread_id?: string
+  checkpoint_ref?: string
+  attempt?: number
   status: string
-  current_node?: string
-  nodes: Array<{ node_id: string; status: string; attempt: number }>
-  issues: Array<{ issue_type: string; target_id: string; severity: string; suggestion: string }>
+  current_node?: string | null
+  nodes: Array<{ node_id: string; status: string; attempt: number; started_at?: string; finished_at?: string; issues?: string[] }>
+  issues: QualityIssue[]
+  state_snapshot?: { repair_scope?: string; degraded?: boolean; model?: string }
+  human_decision?: string
+  created_at?: string
+  updated_at?: string
 }
-export type ExportJob = { job_id: string; status: string; error_message?: string }
+export type QualityIssue = { issue_type: string; target_id: string; severity: string; suggestion: string }
+export type ExportJob = {
+  job_id: string
+  project_id?: string
+  package_type?: 'teacher' | 'student'
+  selected_versions?: Record<string, string>
+  status: string
+  error_message?: string
+  download_url?: string
+}
 export type ApiError = Error & { code?: string; traceId?: string; status?: number; currentVersion?: number }
