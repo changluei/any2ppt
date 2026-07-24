@@ -22,6 +22,7 @@ from app.ai.skills import SlideOutline
 from app.ai.vector_store import ProjectVectorStore
 from app.core.database import SessionLocal
 from app.models import AITask, GraphRun, Project
+from app.services.theme_service import select_theme
 
 
 ARTIFACT_TYPES = ("lesson_plan", "slide_deck", "speaker_notes", "exercise_set")
@@ -42,7 +43,7 @@ def _json_copy(value: Any) -> Any:
 
 def _context_for(project: Project, task: AITask) -> LessonContext:
     snapshot = task.input_snapshot or {}
-    return LessonContext(
+    base_context = LessonContext(
         project_id=project.id,
         subject=project.subject,
         grade=project.grade,
@@ -52,6 +53,17 @@ def _context_for(project: Project, task: AITask) -> LessonContext:
         student_profile=project.student_profile,
         selected_source_ids=snapshot.get("selected_source_ids", []),
         teacher_requirements=snapshot.get("teacher_requirements") or project.teacher_requirements,
+    )
+    theme = select_theme(base_context, project.theme_id)
+    return base_context.model_copy(
+        update={
+            "theme_id": theme["id"],
+            "theme_name": theme["name"],
+            "theme_description": theme["description"],
+            "theme_layouts": theme["layouts"],
+            "theme_guidance": theme["design_guidance"],
+            "theme_image_strategy": theme["image_strategy"],
+        }
     )
 
 
@@ -224,6 +236,27 @@ def _graph_handlers(store: ProjectVectorStore) -> dict[str, Any]:
     def context(state: dict[str, Any]) -> LessonContext:
         return LessonContext.model_validate(state["context"])
 
+    def materialize(
+        state: dict[str, Any],
+        blueprint: LessonBlueprint,
+        outlines: list[SlideOutline],
+        exercises: list[Exercise],
+    ) -> dict[str, dict[str, Any]]:
+        from app.services.artifact_service import compose_ppt_artifact
+
+        lesson = context(state)
+        artifacts = materialize_lesson_artifacts(
+            lesson,
+            blueprint,
+            outlines,
+            exercises,
+        )
+        artifacts["slide_deck"] = compose_ppt_artifact(
+            artifacts,
+            select_theme(lesson, lesson.theme_id),
+        )
+        return artifacts
+
     def analyze_sources(state: dict[str, Any]) -> dict[str, Any]:
         lesson = context(state)
         evidence = retrieve_evidence(
@@ -294,8 +327,8 @@ def _graph_handlers(store: ProjectVectorStore) -> dict[str, Any]:
         )
         if state.get("exercises"):
             exercises = [Exercise.model_validate(item) for item in state["exercises"]]
-            delta["artifacts"] = materialize_lesson_artifacts(
-                context(state),
+            delta["artifacts"] = materialize(
+                state,
                 blueprint,
                 outlines,
                 exercises,
@@ -319,8 +352,8 @@ def _graph_handlers(store: ProjectVectorStore) -> dict[str, Any]:
             {
                 "blueprint": blueprint.model_dump(mode="json"),
                 "exercises": [item.model_dump(mode="json") for item in exercises],
-                "artifacts": materialize_lesson_artifacts(
-                    context(state),
+                "artifacts": materialize(
+                    state,
                     blueprint,
                     outlines,
                     exercises,

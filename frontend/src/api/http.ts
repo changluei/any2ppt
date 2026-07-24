@@ -1,7 +1,7 @@
 import axios from 'axios'
 import type { ApiError } from '../types'
 import { httpStatusText } from '../utils/workbench'
-export const http = axios.create({ baseURL: import.meta.env.VITE_API_BASE_URL, timeout: 30000 })
+export const http = axios.create({ baseURL: import.meta.env.VITE_API_BASE_URL || '', timeout: 30000 })
 const responseError = '接口响应格式异常，请检查 VITE_API_BASE_URL 配置'
 export const objectData = <T>(data: unknown): T => {
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error(responseError)
