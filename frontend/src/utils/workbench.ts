@@ -26,6 +26,8 @@ export const canRetryTask = ({ status }: Task) => status === 'failed' || status 
 export const currentTaskId = (tasks: Task[], saved = '') =>
   tasks.find(({ id }) => id === saved)?.id || tasks.find(({ status }) => status === 'pending' || status === 'running')?.id || tasks[0]?.id || ''
 export const citationAvailable = (sourceId: string, sourceIds: string[]) => sourceIds.includes(sourceId)
+export const shouldSyncMarkdownDraft = (draft: string, previous: string, incoming: string) =>
+  draft === previous || draft === incoming
 
 export const totalMinutes = (stages: LessonStage[] = []) => stages.reduce((sum, item) => sum + item.time_minutes, 0)
 export const showExerciseAnswers = (view: string) => view === '教师视图'

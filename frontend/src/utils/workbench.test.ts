@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ProjectInput, Task } from '../types'
 import { listData, objectData } from '../api/http'
-import { canExport, canRetryTask, citationAvailable, currentTaskId, elapsedText, exportProgress, groupExercises, httpStatusText, issueTargetRoute, safeSlideHtml, shouldPoll, showExerciseAnswers, taskErrorText, totalMinutes, validateProject, workbenchPath } from './workbench'
+import { canExport, canRetryTask, citationAvailable, currentTaskId, elapsedText, exportProgress, groupExercises, httpStatusText, issueTargetRoute, safeSlideHtml, shouldPoll, shouldSyncMarkdownDraft, showExerciseAnswers, taskErrorText, totalMinutes, validateProject, workbenchPath } from './workbench'
 
 const form: ProjectInput = {
   name: '测试项目', subject: '语文', grade: '三年级', textbook_version: '',
@@ -57,6 +57,12 @@ describe('day 6 workflow helpers', () => {
 })
 
 describe('day 5 artifact helpers', () => {
+  it('refreshes Markdown after an external version update without overwriting a local draft', () => {
+    expect(shouldSyncMarkdownDraft('# 旧内容', '# 旧内容', '# AI 修改后的内容')).toBe(true)
+    expect(shouldSyncMarkdownDraft('# 本地尚未保存', '# 旧内容', '# AI 修改后的内容')).toBe(false)
+    expect(shouldSyncMarkdownDraft('# AI 修改后的内容', '# 旧内容', '# AI 修改后的内容')).toBe(true)
+  })
+
   it('sums lesson time and groups exercises', () => {
     expect(totalMinutes([{ time_minutes: 5 }, { time_minutes: 35 }] as never)).toBe(40)
     expect(groupExercises([{ level: '基础' }, { level: '提高' }] as never).map(({ items }) => items.length)).toEqual([1, 0, 1])

@@ -3,6 +3,7 @@ import { computed, onUnmounted, ref, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import MarkdownIt from 'markdown-it'
 import type { SlideImagePlacement, ThemeDescriptor } from '../types'
+import { shouldSyncMarkdownDraft } from '../utils/workbench'
 
 const props = withDefaults(defineProps<{
   markdown: string
@@ -63,8 +64,8 @@ const srcdoc = computed(() => {
   </style></head><body>${backgrounds}${rendered}${foregrounds}</body></html>`
 })
 
-watch(() => props.markdown, (value) => {
-  if (!dirty.value || value === draft.value) draft.value = value
+watch(() => props.markdown, (value, previous) => {
+  if (shouldSyncMarkdownDraft(draft.value, previous, value)) draft.value = value
 })
 watch(() => props.renderedPreviewUrl, (url) => {
   const request = ++previewRequest

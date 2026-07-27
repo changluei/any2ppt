@@ -326,7 +326,13 @@ async function scrollChat() {
 async function sendChat() {
   const message = chatInput.value.trim()
   const imageFile = chatImage.value
-  if ((!message && !imageFile) || busy.value || !latestDeck.value) return
+  if (
+    (!message && !imageFile)
+    || busy.value
+    || markdownDirty.value
+    || markdownSaving.value
+    || !latestDeck.value
+  ) return
   const target = targetSlideFor(message)
   if (!target) return
 
@@ -353,8 +359,7 @@ async function sendChat() {
         position: imagePositionFor(message),
         caption: '',
       })
-      artifacts.value = artifacts.value.map((item) => item.artifact_id === changed.artifact_id ? changed : item)
-      selectedVersionId.value = changed.version_id
+      updateArtifact(changed)
       working = changed
       completed.push(`图片已经添加到第 ${target.order} 页`)
     }
@@ -367,8 +372,7 @@ async function sendChat() {
         instruction: message,
         sync_related: true,
       })
-      artifacts.value = artifacts.value.map((item) => item.artifact_id === changed.artifact_id ? changed : item)
-      selectedVersionId.value = changed.version_id
+      updateArtifact(changed)
       working = changed
       completed.push(`第 ${target.order} 页已按要求更新`)
     }
@@ -613,7 +617,7 @@ onUnmounted(() => {
           </div>
           <textarea
             v-model="chatInput"
-            :disabled="!selectedSlide || !!busy"
+            :disabled="!selectedSlide || !!busy || markdownDirty || markdownSaving"
             maxlength="1000"
             placeholder="例如：精简当前页；或附图后输入“放到第 3 页右侧”…"
             @keydown.meta.enter.prevent="sendChat"
@@ -626,7 +630,7 @@ onUnmounted(() => {
               <span>添加图片</span>
             </label>
             <small>⌘ Enter 发送</small>
-            <button type="button" :disabled="(!chatInput.trim() && !chatImage) || !selectedSlide || !!busy" @click="sendChat">
+            <button type="button" :disabled="(!chatInput.trim() && !chatImage) || !selectedSlide || !!busy || markdownDirty || markdownSaving" @click="sendChat">
               <el-icon><MagicStick /></el-icon>
             </button>
           </div>
