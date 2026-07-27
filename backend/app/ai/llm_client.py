@@ -164,7 +164,11 @@ class DeepSeekClient:
         trace_id: str | None = None,
     ) -> tuple[TModel, LLMResult]:
         schema = output_model.model_json_schema()
-        result = self.invoke(system, user, schema, trace_id=trace_id)
+        schema_user = (
+            f"{user}\n目标 JSON Schema：{json.dumps(schema, ensure_ascii=False)}"
+            "\n必须完整遵守该结构，只输出一个 JSON 对象。"
+        )
+        result = self.invoke(system, schema_user, schema, trace_id=trace_id)
         try:
             return output_model.model_validate(_extract_json(result.text)), result
         except (ValidationError, AIStructuredOutputError) as first_error:

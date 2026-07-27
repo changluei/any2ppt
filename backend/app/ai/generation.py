@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from .exceptions import AIConfigurationError
+from .exceptions import AIConfigurationError, AIError
 from .llm_client import DeepSeekClient
 from .schemas import (
     Activity,
@@ -25,7 +25,7 @@ from .schemas import (
     SpeakerNote,
     TraceInfo,
 )
-from .skills import SlideOutline, run_skill
+from .skills import SlideContentBlock, SlideOutline, run_skill
 from .vector_store import ProjectVectorStore
 
 
@@ -40,6 +40,60 @@ def _dedupe_citations(citations: list[Citation]) -> list[Citation]:
     return list(unique.values())
 
 
+def _matching_layout(layouts: list[str], candidates: list[str]) -> str | None:
+    for candidate in candidates:
+        if candidate in layouts:
+            return candidate
+    for candidate in candidates:
+        match = next((layout for layout in layouts if candidate in layout), None)
+        if match:
+            return match
+    return None
+
+
+def _usable_slots(slots: list[str]) -> list[str]:
+    meaningful = [
+        slot for slot in slots
+        if slot not in {"note", "author", "footer", "caption"}
+    ]
+    return meaningful or ["default"]
+
+
+def _semantic_layout(
+    layouts: list[str],
+    title: str,
+    index: int,
+    *,
+    stage_transition: bool = False,
+) -> str:
+    if index == 1:
+        return _matching_layout(layouts, ["cover", "intro", "lead"]) or layouts[0]
+    if stage_transition:
+        section = _matching_layout(layouts, ["section"])
+        if section:
+            return section
+    rules = [
+        (("比较", "异同", "对比", "已有", "新的发现"), ["compare", "two-cols-title", "top-title-two-cols", "two-cols", "columns"]),
+        (("流程", "步骤", "过程", "方法", "变化"), ["steps", "timeline", "top-title", "side-title"]),
+        (("目标", "要点", "评价", "任务", "分类"), ["four-cell", "panels", "items", "top-title", "side-title"]),
+        (("资料", "观察", "案例", "图表", "实验"), ["figure-side", "figure", "image", "showcase", "full", "top-title"]),
+        (("交流", "质疑", "观点", "原文"), ["quote", "side-title"]),
+        (("总结", "反思", "结束", "致谢"), ["end", "credits", "section", "quote"]),
+    ]
+    for keywords, candidates in rules:
+        if any(keyword in title for keyword in keywords):
+            match = _matching_layout(layouts, candidates)
+            if match:
+                return match
+    body_layouts = [
+        layout for layout in layouts
+        if layout not in {"cover", "intro", "lead", "section", "credits", "end", "thanks", "default"}
+    ]
+    if body_layouts and index % 3 != 0:
+        return body_layouts[(index - 2) % len(body_layouts)]
+    return "default" if "default" in layouts else layouts[0]
+
+
 def _fallback_outlines(context: LessonContext) -> list[SlideOutline]:
     titles = [
         "课题与学习任务", "情境问题", "说说已有经验", "本课学习目标", "观察资料",
@@ -47,23 +101,34 @@ def _fallback_outlines(context: LessonContext) -> list[SlideOutline]:
         "基础练习", "巩固练习", "提高挑战", "易错提醒", "课堂小结", "自我评价",
     ]
     layouts = context.theme_layouts or ["default"]
-    return [
-        SlideOutline(
+    outlines: list[SlideOutline] = []
+    previous_stage = ""
+    for index, title in enumerate(titles, 1):
+        stage = "STAGE-1" if index <= 4 else "STAGE-2" if index <= 10 else "STAGE-3" if index <= 14 else "STAGE-4"
+        layout = _semantic_layout(
+            layouts,
+            title,
+            index,
+            stage_transition=bool(previous_stage and previous_stage != stage),
+        )
+        previous_stage = stage
+        outlines.append(SlideOutline(
             title=title,
-            teaching_stage=("STAGE-1" if index <= 4 else "STAGE-2" if index <= 10 else "STAGE-3" if index <= 14 else "STAGE-4"),
+            teaching_stage=stage,
             objective_ids=["OBJ-1"] if index <= 8 else ["OBJ-2"] if index <= 14 else ["OBJ-1", "OBJ-2"],
             purpose=f"围绕“{context.lesson_topic}”形成可观察的学习证据",
-            layout=(
-                "cover" if index == 1 and "cover" in layouts
-                else "section" if index in {5, 11, 15} and "section" in layouts
-                else "fact" if index in {9, 14} and "fact" in layouts
-                else "default" if "default" in layouts
-                else layouts[0]
-            ),
-            visual_intent="使用模板能力突出问题、证据或结论，避免文字铺满页面",
-        )
-        for index, title in enumerate(titles, 1)
-    ]
+            layout=layout,
+            visual_intent=f"使用 {layout} 布局呈现本页语义，避免连续使用通用正文页",
+            blocks=[
+                SlideContentBlock(
+                    slot="default",
+                    heading=title,
+                    body=f"围绕“{context.lesson_topic}”完成本页学习任务",
+                    bullets=["观察关键信息", "说明自己的依据", "形成可检查的结论"],
+                )
+            ],
+        ))
+    return outlines
 
 
 def _normalize_outlines(
@@ -79,12 +144,71 @@ def _normalize_outlines(
     safe: list[SlideOutline] = []
     default_ids = sorted(objective_ids)[:1]
     default_stage = sorted(stage_ids)[0]
-    for outline in normalized:
+    layouts = context.theme_layouts or ["default"]
+    capability_map = {
+        item.name: item
+        for item in context.theme_layout_capabilities
+        if item.name in layouts
+    }
+    previous_stage = ""
+    for index, outline in enumerate(normalized, 1):
         ids = [item for item in outline.objective_ids if item in objective_ids] or default_ids
         stage = outline.teaching_stage if outline.teaching_stage in stage_ids else default_stage
-        layouts = context.theme_layouts or ["default"]
         layout = outline.layout if outline.layout in layouts else ("default" if "default" in layouts else layouts[0])
-        safe.append(outline.model_copy(update={"objective_ids": ids, "teaching_stage": stage, "layout": layout}))
+        if index == 1 or (previous_stage and previous_stage != stage) or layout == "default":
+            suggested = _semantic_layout(
+                layouts,
+                outline.title,
+                index,
+                stage_transition=bool(previous_stage and previous_stage != stage),
+            )
+            if index == 1 or previous_stage != stage or suggested != "default":
+                layout = suggested
+        previous_stage = stage
+        capability = capability_map.get(layout)
+        slots = _usable_slots(capability.slots) if capability else ["default"]
+        blocks = []
+        for block in outline.blocks:
+            slot = block.slot if block.slot in slots else ("default" if "default" in slots else slots[0])
+            blocks.append(block.model_copy(update={"slot": slot}))
+        if not blocks:
+            blocks = [SlideContentBlock(slot="default" if "default" in slots else slots[0], heading=outline.title, body=outline.purpose)]
+        safe.append(
+            outline.model_copy(
+                update={
+                    "objective_ids": ids,
+                    "teaching_stage": stage,
+                    "layout": layout,
+                    "blocks": blocks,
+                }
+            )
+        )
+
+    maximum_default = max(1, int(len(safe) * 0.4))
+    default_indexes = [index for index, outline in enumerate(safe) if outline.layout == "default"]
+    alternatives = [
+        layout for layout in layouts
+        if layout not in {"default", "cover", "intro", "lead", "section", "credits", "end", "thanks"}
+    ]
+    for offset, outline_index in enumerate(default_indexes[maximum_default:]):
+        if not alternatives:
+            break
+        replacement = alternatives[offset % len(alternatives)]
+        capability = capability_map.get(replacement)
+        slots = _usable_slots(capability.slots) if capability else ["default"]
+        blocks = [
+            block.model_copy(
+                update={"slot": block.slot if block.slot in slots else ("default" if "default" in slots else slots[0])}
+            )
+            for block in safe[outline_index].blocks
+        ]
+        safe[outline_index] = safe[outline_index].model_copy(
+            update={
+                "layout": replacement,
+                "blocks": blocks,
+                "visual_intent": safe[outline_index].visual_intent or f"使用 {replacement} 避免页面结构重复",
+            }
+        )
     return safe
 
 
@@ -153,27 +277,75 @@ def _allocate_note_minutes(slides: list[SlideOutline], activities: list[Activity
     return minutes
 
 
+def _block_markdown(block: SlideContentBlock, *, title_level: int = 2) -> str:
+    rows = []
+    if block.heading:
+        rows.append(f"{'#' * title_level} {block.heading}")
+    if block.body:
+        rows.append(block.body)
+    if block.bullets:
+        rows.append("\n".join(f"- {item}" for item in block.bullets))
+    return "\n\n".join(rows)
+
+
 def _slide_markdown(context: LessonContext, outline: SlideOutline, has_citations: bool) -> str:
     evidence_line = "\n\n> 资料依据可在来源面板查看" if has_citations else ""
+    capability = next(
+        (item for item in context.theme_layout_capabilities if item.name == outline.layout),
+        None,
+    )
+    slots = _usable_slots(capability.slots) if capability else ["default"]
+    named_slots = [slot for slot in slots if slot != "default"]
+    if named_slots:
+        by_slot: dict[str, list[SlideContentBlock]] = {}
+        for block in outline.blocks:
+            by_slot.setdefault(block.slot, []).append(block)
+        seed_blocks = outline.blocks or [SlideContentBlock(body=outline.purpose)]
+        seed_points = [
+            point
+            for block in seed_blocks
+            for point in (block.bullets or ([block.body] if block.body else []))
+            if point
+        ] or [outline.purpose]
+        sections = []
+        content_slots = [slot for slot in named_slots if slot != "title"]
+        content_index = 0
+        for slot in named_slots:
+            blocks = by_slot.get(slot, [])
+            if slot == "title":
+                content = "\n\n".join(_block_markdown(block, title_level=1) for block in blocks)
+                content = content or f"# {outline.title}"
+            elif blocks:
+                content = "\n\n".join(_block_markdown(block) for block in blocks)
+            else:
+                point = seed_points[content_index % len(seed_points)]
+                content_index += 1
+                heading = {
+                    "left": "核心信息",
+                    "right": "应用与思考",
+                    "content": outline.title,
+                    "top-left": "要点一",
+                    "top-right": "要点二",
+                    "bottom-left": "要点三",
+                    "bottom-right": "要点四",
+                }.get(slot, outline.title if len(content_slots) == 1 else "")
+                content = _block_markdown(SlideContentBlock(heading=heading, body=point))
+            sections.append(f"::{slot}::\n{content}")
+        if evidence_line:
+            sections[-1] += evidence_line
+        return "\n\n".join(sections)
+
+    block_content = "\n\n".join(_block_markdown(block) for block in outline.blocks)
     if outline.layout in {"cover", "intro", "lead"}:
         return f"# {outline.title}\n\n## {context.lesson_topic}\n\n{outline.purpose}"
+    if outline.layout == "section":
+        return f"# {outline.title}\n\n{outline.purpose}"
     if outline.layout in {"fact", "statement", "bigtype"}:
-        return f"# {outline.title}\n\n## {outline.purpose}"
+        return f"# {outline.title}\n\n## {block_content or outline.purpose}"
     if outline.layout == "quote":
-        return f"# {outline.title}\n\n> {outline.purpose}{evidence_line}"
-    if outline.layout in {"steps", "timeline"}:
-        return (
-            f"# {outline.title}\n\n"
-            f"1. 观察与发现\n2. 表达与解释\n3. 应用与检验\n\n"
-            f"**本页任务：** {outline.purpose}{evidence_line}"
-        )
-    if outline.layout in {"compare", "two-cols", "columns", "panels"}:
-        return (
-            f"# {outline.title}\n\n"
-            f"### 已有认识\n{context.lesson_topic}中的现象或方法\n\n"
-            f"### 新的发现\n{outline.purpose}{evidence_line}"
-        )
-    return f"# {outline.title}\n\n{outline.purpose}\n\n**学习主题：** {context.lesson_topic}{evidence_line}"
+        quote = next((block.body for block in outline.blocks if block.body), outline.purpose)
+        return f"# {outline.title}\n\n> {quote}{evidence_line}"
+    return f"# {outline.title}\n\n{block_content or outline.purpose}{evidence_line}"
 
 
 def _materialize_artifacts(
@@ -199,6 +371,18 @@ def _materialize_artifacts(
                 teaching_stage=outline.teaching_stage,
                 objective_ids=outline.objective_ids,
                 citations=citations,
+                visual_intent=outline.visual_intent,
+                content_blocks=[block.model_dump(mode="json") for block in outline.blocks],
+                layout_slots=(
+                    next(
+                        (
+                            _usable_slots(capability.slots)
+                            for capability in context.theme_layout_capabilities
+                            if capability.name == outline.layout
+                        ),
+                        ["default"],
+                    )
+                ),
             )
         )
 
@@ -232,6 +416,15 @@ def _materialize_artifacts(
         "slide_deck": {
             "deck_title": context.lesson_topic,
             "theme": "seriph",
+            "theme_id": context.theme_id,
+            "theme_name": context.theme_name,
+            "theme_layouts": context.theme_layouts,
+            "theme_layout_capabilities": [
+                item.model_dump(mode="json")
+                for item in context.theme_layout_capabilities
+            ],
+            "theme_design_guidance": context.theme_guidance,
+            "theme_image_strategy": context.theme_image_strategy,
             "slides": [item.model_dump(mode="json") for item in slides],
             "citations": citation_dicts,
         },
@@ -500,9 +693,11 @@ def revise_block(
                 prompt,
                 LocalRevisionOutput,
             )
-            changed = output.changed_block
+            changed = {**row, **output.changed_block}
             changed[id_field] = target_id
-        except AIConfigurationError:
+            if changed == row:
+                changed = _rule_revision(row, target_type, instruction)
+        except (AIConfigurationError, AIError):
             changed = _rule_revision(row, target_type, instruction)
         rows[index] = changed
         return updated, [target_id]

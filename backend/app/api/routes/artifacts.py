@@ -1,5 +1,7 @@
 from __future__ import annotations
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import Optional
 from app.core.database import get_db
@@ -13,6 +15,7 @@ from app.services.artifact_service import (
     save_version,
     update_slide_markdown,
 )
+from app.services.preview_service import render_slide_preview
 
 router = APIRouter(prefix="/api/artifacts", tags=["artifacts"])
 
@@ -34,6 +37,20 @@ def versions(artifact_id: str, db: Session = Depends(get_db)):
     if not artifact:
         raise HTTPException(404, detail={"code": "ARTIFACT_NOT_FOUND", "message": "产物不存在"})
     return [artifact_out(artifact, version) for version in reversed(artifact.versions)]
+
+
+@router.get("/{artifact_id}/preview/{slide_id}")
+def preview(artifact_id: str, slide_id: str, version: Optional[int] = None, db: Session = Depends(get_db)):
+    artifact = db.get(LessonArtifact, artifact_id)
+    if not artifact:
+        raise HTTPException(404, detail={"code": "ARTIFACT_NOT_FOUND", "message": "产物不存在"})
+    try:
+        path = render_slide_preview(db, artifact, slide_id, version)
+        return FileResponse(path, media_type="image/png", headers={"Cache-Control": "private, max-age=31536000, immutable"})
+    except ValueError as exc:
+        raise HTTPException(400, detail={"code": "INVALID_PREVIEW", "message": str(exc)}) from exc
+    except (httpx.HTTPError, RuntimeError) as exc:
+        raise HTTPException(502, detail={"code": "PREVIEW_RENDER_FAILED", "message": "Slidev 主题预览渲染失败"}) from exc
 
 
 @router.post("/{artifact_id}/revise", response_model=ArtifactOut)

@@ -31,6 +31,85 @@ def get_theme(theme_id: str) -> dict[str, Any] | None:
     return next((item for item in theme_catalog() if item["id"] == theme_id), None)
 
 
+def _layout_usage(name: str) -> str:
+    if any(token in name for token in ("cover", "intro", "lead")):
+        return "封面、开场或章节引入；使用短标题和一句核心信息"
+    if "section" in name:
+        return "章节过渡；只呈现章节名和简短提示"
+    if "quote" in name:
+        return "引用、核心观点或关键原文"
+    if any(token in name for token in ("two-cols", "columns", "compare")):
+        return "比较、左右对应关系、概念与案例或问题与结论"
+    if any(token in name for token in ("four", "grid", "cell", "panel", "item")):
+        return "并列要点、分类或评价维度"
+    if any(token in name for token in ("image", "figure", "showcase", "full")):
+        return "大图、图表、案例截图或沉浸式视觉页面"
+    if any(token in name for token in ("steps", "timeline", "diagram")):
+        return "流程、阶段、时间发展或概念关系"
+    if any(token in name for token in ("fact", "statement", "bigtype")):
+        return "单个关键数字、结论或强强调观点"
+    return "常规正文页"
+
+
+def _fallback_capabilities(theme: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "schema_version": 2,
+        "theme_spec": f"{theme['package']}@{theme['version']}",
+        "package_name": theme["package"],
+        "layouts": [
+            {
+                "name": name,
+                "slots": ["left", "right"] if name in {"two-cols", "columns", "compare"} else ["default"],
+                "props": [],
+                "usage": _layout_usage(name),
+                "markdown_pattern": (
+                    "::left::\n{{left}}\n\n::right::\n{{right}}"
+                    if name in {"two-cols", "columns", "compare"}
+                    else "# {{title}}\n\n{{body}}"
+                ),
+                "supports_images": any(token in name for token in ("image", "figure", "showcase", "full")),
+                "structural": name != "default",
+            }
+            for name in theme.get("layouts", ["default"])
+        ],
+        "components": [],
+        "source": "catalog-fallback",
+    }
+
+
+@lru_cache(maxsize=32)
+def get_theme_capabilities(theme_id: str) -> dict[str, Any]:
+    theme = get_theme(theme_id)
+    if not theme:
+        raise ValueError("THEME_NOT_FOUND")
+    settings = get_settings()
+    fallback = _fallback_capabilities(theme)
+    if not settings.slidev_renderer_url:
+        return fallback
+    try:
+        response = httpx.post(
+            f"{settings.slidev_renderer_url.rstrip('/')}/capabilities",
+            json={
+                "theme_package": theme["package"],
+                "theme_version": theme["version"],
+            },
+            timeout=settings.slidev_renderer_timeout_seconds,
+        )
+        response.raise_for_status()
+        manifest = response.json()
+        layouts = [
+            row for row in manifest.get("layouts", [])
+            if isinstance(row, dict) and row.get("name")
+        ]
+        if not layouts:
+            return fallback
+        manifest["layouts"] = layouts
+        manifest["source"] = "installed-theme"
+        return manifest
+    except (httpx.HTTPError, ValueError, TypeError):
+        return fallback
+
+
 def select_theme(context: LessonContext, preferred_theme_id: str | None = None) -> dict[str, Any]:
     if preferred_theme_id and (preferred := get_theme(preferred_theme_id)):
         result = {key: value for key, value in preferred.items() if key != "match_terms"}
@@ -84,6 +163,7 @@ def prepare_project_theme(project_id: str, theme_id: str) -> None:
         timeout=settings.slidev_renderer_timeout_seconds,
     )
     response.raise_for_status()
+    get_theme_capabilities.cache_clear()
 
 
 def delete_project_theme(project_id: str) -> None:

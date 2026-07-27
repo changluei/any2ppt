@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import MarkdownIt from 'markdown-it'
 import type { SlideImagePlacement, ThemeDescriptor } from '../types'
@@ -7,15 +7,17 @@ import type { SlideImagePlacement, ThemeDescriptor } from '../types'
 const props = withDefaults(defineProps<{
   markdown: string
   title?: string
-  saving?: boolean
+  syncing?: boolean
   images?: SlideImagePlacement[]
   imageBaseUrl?: string
   themePalette?: ThemeDescriptor['palette']
+  renderedPreviewUrl?: string
 }>(), {
   title: '',
-  saving: false,
+  syncing: false,
   images: () => [],
   imageBaseUrl: '',
+  renderedPreviewUrl: '',
   themePalette: () => ({
     background: '#142b4d',
     surface: '#0b1930',
@@ -24,12 +26,15 @@ const props = withDefaults(defineProps<{
   }),
 })
 const emit = defineEmits<{
-  save: [markdown: string]
-  'dirty-change': [dirty: boolean]
+  change: [markdown: string]
 }>()
 
-const sourceVisible = ref(false)
 const draft = ref(props.markdown)
+const displayedPreviewUrl = ref('')
+const renderedLoaded = ref(false)
+const renderedFailed = ref(false)
+const previewLoading = ref(false)
+let previewRequest = 0
 const parser = new MarkdownIt({ html: false, linkify: true, breaks: true })
 const dirty = computed(() => draft.value !== props.markdown)
 function placementHtml(placement: SlideImagePlacement) {
@@ -59,76 +64,118 @@ const srcdoc = computed(() => {
 })
 
 watch(() => props.markdown, (value) => {
-  draft.value = value
+  if (!dirty.value || value === draft.value) draft.value = value
 })
-watch(dirty, (value) => emit('dirty-change', value), { immediate: true })
+watch(() => props.renderedPreviewUrl, (url) => {
+  const request = ++previewRequest
+  if (!url) {
+    displayedPreviewUrl.value = ''
+    renderedLoaded.value = false
+    renderedFailed.value = false
+    previewLoading.value = false
+    return
+  }
+  if (url === displayedPreviewUrl.value && renderedLoaded.value) return
+  previewLoading.value = true
+  const loader = new Image()
+  loader.onload = () => {
+    if (request !== previewRequest) return
+    displayedPreviewUrl.value = url
+    renderedLoaded.value = true
+    renderedFailed.value = false
+    previewLoading.value = false
+  }
+  loader.onerror = () => {
+    if (request !== previewRequest) return
+    renderedFailed.value = !displayedPreviewUrl.value
+    previewLoading.value = false
+  }
+  loader.src = url
+}, { immediate: true })
+
+function updateDraft(event: Event) {
+  draft.value = (event.target as HTMLTextAreaElement).value
+  emit('change', draft.value)
+}
+
+onUnmounted(() => {
+  previewRequest += 1
+})
 </script>
 
 <template>
   <div class="slidev-preview">
     <div class="preview-toolbar">
       <div>
-        <b>{{ sourceVisible ? 'Markdown 实时编辑' : '课件预览' }}</b>
-        <span v-if="sourceVisible">输入后右侧立即重新编译</span>
-      </div>
-      <div class="toolbar-actions">
-        <span v-if="dirty" class="unsaved">未保存</span>
-        <el-button
-          v-if="dirty"
-          type="primary"
-          size="small"
-          :loading="saving"
-          :disabled="saving || !draft.trim()"
-          @click="emit('save', draft)"
-        >
-          保存修改
-        </el-button>
-        <el-button link @click="sourceVisible = !sourceVisible">
-          {{ sourceVisible ? '返回全屏预览' : '编辑 Markdown 源码' }}
-        </el-button>
+        <span class="live-dot" />
+        <b>实时预览</b>
+        <span v-if="syncing || previewLoading">正在自动同步并编译主题预览</span>
+        <span v-else-if="dirty">停止输入后自动同步</span>
+        <span v-else-if="renderedLoaded">Slidev 真实主题渲染 · 已同步</span>
+        <span v-else-if="renderedPreviewUrl && !renderedFailed">正在准备真实主题预览</span>
+        <span v-else>当前页修改会自动同步</span>
       </div>
     </div>
 
-    <div v-if="sourceVisible" class="source-workspace">
-      <div class="source-editor">
-        <div class="editor-caption"><span>当前页源码</span><span>{{ draft.length }} 字符</span></div>
+    <div class="preview-stage">
+      <img
+        v-if="displayedPreviewUrl && !renderedFailed"
+        class="rendered-slide"
+        :class="{ ready: renderedLoaded }"
+        :src="displayedPreviewUrl"
+        :alt="`${title || '课件'}的 Slidev 主题预览`"
+      />
+      <iframe
+        v-show="!renderedLoaded"
+        :title="title || '课件预览'"
+        :srcdoc="srcdoc"
+        sandbox=""
+        referrerpolicy="no-referrer"
+      />
+      <div v-if="(dirty || syncing || previewLoading) && renderedLoaded" class="preview-syncing">
+        <span />
+        {{ dirty && !syncing ? '等待自动同步' : '正在生成新预览' }}
+      </div>
+    </div>
+
+    <div class="source-editor">
+      <div class="editor-tabs">
+        <div><b>slides.md</b><span>大纲</span></div>
+        <span class="slidev-chip">⚡ Slidev</span>
+      </div>
+      <div class="editor-body">
+        <div class="line-numbers" aria-hidden="true">
+          <span v-for="line in Math.max(8, draft.split('\n').length)" :key="line">{{ line }}</span>
+        </div>
         <textarea
-          v-model="draft"
+          :value="draft"
           aria-label="当前页 Markdown 源码"
           spellcheck="false"
           placeholder="# 页面标题&#10;&#10;- 输入课件内容"
-        />
-      </div>
-      <div class="live-preview">
-        <div class="editor-caption"><span>实时编译结果</span><span>LIVE</span></div>
-        <iframe
-          :title="`${title || '课件'}实时预览`"
-          :srcdoc="srcdoc"
-          sandbox=""
-          referrerpolicy="no-referrer"
+          @input="updateDraft"
         />
       </div>
     </div>
-    <iframe
-      v-else
-      :title="title || '课件预览'"
-      :srcdoc="srcdoc"
-      sandbox=""
-      referrerpolicy="no-referrer"
-    />
   </div>
 </template>
 
 <style scoped>
-.slidev-preview{border:1px solid #dce3ee;border-radius:12px;overflow:hidden;background:#fff}
-.preview-toolbar,.preview-toolbar>div,.toolbar-actions,.editor-caption{display:flex;align-items:center}
-.preview-toolbar{min-height:44px;justify-content:space-between;gap:12px;padding:8px 12px;background:#f6f8fc;color:#67758d;font-size:12px}
-.preview-toolbar>div,.toolbar-actions{gap:10px}.preview-toolbar b{color:#38445b;font-size:13px}.unsaved{color:#d97706}
-.source-workspace{display:grid;grid-template-columns:minmax(320px,42%) minmax(0,58%);min-height:470px}
-.source-editor,.live-preview{display:flex;min-width:0;flex-direction:column}.source-editor{border-right:1px solid #dce3ee;background:#111c2e}
-.editor-caption{height:34px;justify-content:space-between;padding:0 12px;background:#1a2940;color:#aebed2;font-size:11px;letter-spacing:.02em}
-.live-preview .editor-caption{background:#e9edf5;color:#68748a}.live-preview .editor-caption span:last-child{color:#3e8c68;font-weight:700}
-textarea{display:block;flex:1;width:100%;min-height:436px;resize:none;border:0;outline:0;padding:18px;background:#111c2e;color:#dceaff;font:14px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;tab-size:2}
-iframe{display:block;width:100%;aspect-ratio:16/9;border:0;background:#102444}.live-preview iframe{flex:1;aspect-ratio:auto;min-height:436px}
-@media(max-width:980px){.source-workspace{grid-template-columns:1fr}.source-editor{border-right:0;border-bottom:1px solid #dce3ee}.source-workspace textarea,.live-preview iframe{min-height:360px}}
+.slidev-preview{max-width:980px;margin:0 auto;border:1px solid #d9e1dc;border-radius:14px;overflow:hidden;background:#fff;box-shadow:0 18px 46px rgba(26,47,36,.09)}
+.preview-toolbar,.preview-toolbar>div,.editor-tabs,.editor-tabs>div{display:flex;align-items:center}
+.preview-toolbar{min-height:40px;justify-content:space-between;gap:12px;padding:7px 12px;background:#fff;color:#7b8780;font-size:10px}
+.preview-toolbar>div{gap:8px}.preview-toolbar b{color:#35433c;font-size:11px}.live-dot{width:7px;height:7px;border-radius:50%;background:#0eaa79;box-shadow:0 0 0 4px rgba(14,170,121,.1)}
+.preview-stage{position:relative;padding:12px 14px 14px;background:linear-gradient(145deg,#f1f8f4,#e8f1ec)}
+.preview-stage iframe,.rendered-slide{display:block;width:100%;aspect-ratio:16/9;border:1px solid #d9e2dd;border-radius:8px;background:#fff;box-shadow:0 12px 30px rgba(17,45,31,.12)}.rendered-slide{display:none;object-fit:contain}.rendered-slide.ready{display:block}
+.preview-syncing{position:absolute;right:26px;top:24px;display:flex;align-items:center;gap:7px;padding:7px 10px;border:1px solid rgba(255,255,255,.75);border-radius:999px;background:rgba(20,35,28,.72);color:#fff;font-size:9px;box-shadow:0 6px 18px rgba(15,35,25,.16);backdrop-filter:blur(8px)}
+.preview-syncing span{width:7px;height:7px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:previewSpin .8s linear infinite}
+@keyframes previewSpin{to{transform:rotate(360deg)}}
+.source-editor{border-top:1px solid #dfe6e2;background:#fbfdfc}
+.editor-tabs{height:40px;justify-content:space-between;padding:0 13px;border-bottom:1px solid #dfe6e2;background:#f4f7f5;color:#8b958f;font-size:10px}
+.editor-tabs>div{align-self:stretch;gap:22px}.editor-tabs b{display:flex;align-items:center;border-bottom:2px solid #0eaa79;color:#27342e}.slidev-chip{padding:5px 10px;border:1px solid #b9e2d2;border-radius:999px;background:#e8f7f1;color:#087f5b;font-weight:700}
+.editor-body{display:grid;grid-template-columns:38px minmax(0,1fr);min-height:210px}
+.line-numbers{display:flex;flex-direction:column;align-items:end;padding:15px 9px 15px 0;border-right:1px solid #e6ebe8;background:#f3f6f4;color:#a5aea9;font:11px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;user-select:none}
+textarea{display:block;width:100%;min-height:210px;resize:vertical;border:0;outline:0;padding:15px 18px;background:#fbfdfc;color:#34423b;caret-color:#0eaa79;font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;tab-size:2}
+textarea::placeholder{color:#abb4af}
+textarea:focus{background:#fff;box-shadow:inset 0 0 0 1px rgba(14,170,121,.18)}
+textarea::selection{background:rgba(14,170,121,.18)}
 </style>

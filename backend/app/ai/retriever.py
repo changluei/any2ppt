@@ -57,12 +57,17 @@ def retrieve_evidence(
 ) -> EvidenceSet:
     settings = get_settings()
     vector_store = store or ProjectVectorStore()
+    threshold = (
+        0.0
+        if context.selected_source_ids
+        else settings.ai_min_score if min_score is None else min_score
+    )
     rows = vector_store.similarity_search(
         context.project_id,
         query,
         top_k=top_k or settings.ai_top_k,
         source_ids=context.selected_source_ids or None,
-        min_score=settings.ai_min_score if min_score is None else min_score,
+        min_score=threshold,
     )
     warnings: list[str] = []
     sufficient = bool(rows) and max(row["score"] for row in rows) >= max(settings.ai_min_score, 0.12)

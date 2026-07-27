@@ -7,7 +7,7 @@ from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field
 
-from .exceptions import AIConfigurationError
+from .exceptions import AIConfigurationError, AIError
 from .llm_client import DeepSeekClient
 from .retriever import EvidenceSet, retrieve_evidence
 from .schemas import (
@@ -41,6 +41,13 @@ class TeachingActivitiesOutput(BaseModel):
     assessments: list[Assessment] = Field(min_length=1)
 
 
+class SlideContentBlock(BaseModel):
+    slot: str = "default"
+    heading: str = ""
+    body: str = ""
+    bullets: list[str] = Field(default_factory=list, max_length=6)
+
+
 class SlideOutline(BaseModel):
     title: str
     teaching_stage: str
@@ -48,6 +55,7 @@ class SlideOutline(BaseModel):
     purpose: str
     layout: str = "default"
     visual_intent: str = ""
+    blocks: list[SlideContentBlock] = Field(default_factory=list, max_length=8)
 
 
 class SlideNarrativeOutput(BaseModel):
@@ -123,10 +131,15 @@ class TeachingSkill:
             model_name = result.model
             attempts = result.attempts
             usage = result.usage
-        except AIConfigurationError:
+        except (AIConfigurationError, AIError) as exc:
             output = self.fallback(request, evidence)
             degraded = True
-            warnings.append("未配置 DeepSeek；当前 Skill 返回规则降级草案，必须由教师确认。")
+            warning = (
+                "未配置 DeepSeek；当前 Skill 返回规则降级草案，必须由教师确认。"
+                if isinstance(exc, AIConfigurationError)
+                else "模型生成暂时不可用；当前 Skill 已返回规则降级草案，必须由教师确认。"
+            )
+            warnings.append(warning)
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         trace = TraceInfo(
             trace_id=run_trace,
@@ -230,8 +243,11 @@ class SlideNarrativeSkill(TeachingSkill):
     query_template = "{grade}{subject} {topic} 教学材料 课堂呈现 例题"
     instructions = (
         "规划 12—18 页，每页聚焦一个教学目的，避免大段文字。"
-        "必须结合课程上下文中的 theme_layouts、theme_guidance 和 theme_image_strategy 选择版式；"
-        "layout 只能使用 theme_layouts 中的值，并通过 visual_intent 说明该页的视觉重点。"
+        "必须逐项阅读课程上下文中的 theme_layout_capabilities、theme_guidance 和 theme_image_strategy；"
+        "layout 只能使用能力清单中的 name，blocks.slot 只能使用该布局的 slots。"
+        "根据页面语义主动使用封面、章节、分栏、网格、引用、图片等不同布局，default 不得超过总页数的 40%。"
+        "整套演示在主题支持时至少使用 4 种布局；通过 visual_intent 说明选择原因。"
+        "blocks 中提供该布局各区域的真实内容，禁止只给空泛的“学习主题”占位语。"
     )
 
     def fallback(self, request: SkillRequest, evidence: EvidenceSet) -> BaseModel:
@@ -256,6 +272,14 @@ class SlideNarrativeSkill(TeachingSkill):
                     else layouts[0]
                 ),
                 visual_intent="突出本页核心任务，控制文字数量并形成清晰视觉层级",
+                blocks=[
+                    SlideContentBlock(
+                        slot="default",
+                        heading=title,
+                        body="引导学生观察、表达、应用并形成可评价的学习证据",
+                        bullets=["观察现象", "提取信息", "说明依据", "形成结论"],
+                    )
+                ],
             )
             for index, title in enumerate(titles, 1)
         ]

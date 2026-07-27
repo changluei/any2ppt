@@ -22,6 +22,7 @@ from app.ai.skills import SlideOutline
 from app.ai.vector_store import ProjectVectorStore
 from app.core.database import SessionLocal
 from app.models import AITask, GraphRun, Project
+from app.services.theme_service import get_theme_capabilities, select_theme
 
 
 ARTIFACT_TYPES = ("lesson_plan", "slide_deck", "speaker_notes", "exercise_set")
@@ -42,7 +43,7 @@ def _json_copy(value: Any) -> Any:
 
 def _context_for(project: Project, task: AITask) -> LessonContext:
     snapshot = task.input_snapshot or {}
-    return LessonContext(
+    base = LessonContext(
         project_id=project.id,
         subject=project.subject,
         grade=project.grade,
@@ -52,6 +53,23 @@ def _context_for(project: Project, task: AITask) -> LessonContext:
         student_profile=project.student_profile,
         selected_source_ids=snapshot.get("selected_source_ids", []),
         teacher_requirements=snapshot.get("teacher_requirements") or project.teacher_requirements,
+    )
+    selected_theme = select_theme(base, project.theme_id)
+    capabilities = get_theme_capabilities(selected_theme["id"])
+    layout_capabilities = capabilities.get("layouts", [])
+    layouts = [item["name"] for item in layout_capabilities if item.get("name")]
+    return LessonContext.model_validate(
+        {
+            **base.model_dump(mode="json"),
+            "theme_id": selected_theme["id"],
+            "theme_name": selected_theme["name"],
+            "theme_description": selected_theme["description"],
+            "theme_layouts": layouts or selected_theme["layouts"],
+            "theme_layout_capabilities": layout_capabilities,
+            "theme_components": capabilities.get("components", []),
+            "theme_guidance": selected_theme["design_guidance"],
+            "theme_image_strategy": selected_theme["image_strategy"],
+        }
     )
 
 
@@ -366,8 +384,7 @@ def _artifact_hash(artifacts: dict[str, dict[str, Any]]) -> str:
 
 
 def _persist_graph_result(graph_id: str, state: dict[str, Any]) -> dict[str, Any]:
-    from app.services.artifact_service import save_version
-
+    from app.services.artifact_service import compose_ppt_artifact, save_version
     artifacts = state.get("artifacts", {})
     with SessionLocal() as db:
         graph = db.get(GraphRun, graph_id)
@@ -386,6 +403,19 @@ def _persist_graph_result(graph_id: str, state: dict[str, Any]) -> dict[str, Any
             db.commit()
             return state
         if state.get("current_node") == "human_confirm" and artifacts:
+            project = db.get(Project, graph.project_id)
+            if not project:
+                raise RuntimeError("PROJECT_NOT_FOUND")
+            artifacts = deepcopy(artifacts)
+            lesson_context = _context_for(project, task)
+            selected_theme = select_theme(lesson_context, project.theme_id)
+            selected_theme["layouts"] = lesson_context.theme_layouts
+            selected_theme["layout_capabilities"] = [
+                item.model_dump(mode="json")
+                for item in lesson_context.theme_layout_capabilities
+            ]
+            artifacts["slide_deck"] = compose_ppt_artifact(artifacts, selected_theme)
+            state["artifacts"] = artifacts
             digest = _artifact_hash(artifacts)
             if digest != state.get("persisted_artifact_hash"):
                 citation_rows = list(state.get("citations", []))

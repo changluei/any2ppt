@@ -12,10 +12,33 @@ from app.ai.schemas import LessonContext, SkillRequest
 from app.ai.skills import run_skill
 from app.core.database import SessionLocal
 from app.models import AITask, ArtifactVersion, GraphRun, LessonArtifact, Project, ProjectImage
-from app.services.theme_service import select_theme
+from app.services.theme_service import get_theme_capabilities, select_theme
 
 
 ARTIFACT_TYPES = ("lesson_plan", "slide_deck", "speaker_notes", "exercise_set")
+
+
+def _layout_markdown(slide: dict, title: str, sections: list[str]) -> str:
+    slots = [
+        slot for slot in slide.get("layout_slots", ["default"])
+        if slot not in {"note", "author", "footer", "caption"}
+    ] or ["default"]
+    named = [slot for slot in slots if slot != "default"]
+    if not named:
+        return f"# {title}\n\n" + "\n\n".join(sections)
+    rows = []
+    content_slots = [slot for slot in named if slot != "title"]
+    content_index = 0
+    for slot in named:
+        if slot == "title":
+            content = f"# {title}"
+        elif len(content_slots) == 1:
+            content = "\n\n".join(sections)
+        else:
+            content = sections[content_index % len(sections)] if sections else title
+            content_index += 1
+        rows.append(f"::{slot}::\n{content}")
+    return "\n\n".join(rows)
 
 
 def compose_ppt_artifact(artifacts: dict[str, dict], theme: dict | None = None) -> dict:
@@ -38,16 +61,31 @@ def compose_ppt_artifact(artifacts: dict[str, dict], theme: dict | None = None) 
     objectives = plan.get("objectives", [])
     target = slide_at(4)
     if target:
-        target["markdown"] = "# 本课学习目标\n\n" + "\n".join(
-            f"- {item.get('behavior', '')}（{item.get('criterion', '完成课堂任务')}）"
-            for item in objectives
+        objective_sections = [
+            f"## 目标 {index}\n\n{item.get('behavior', '')}\n\n**达成标准：** {item.get('criterion', '完成课堂任务')}"
+            for index, item in enumerate(objectives, 1)
+        ]
+        objective_sections.extend(
+            [
+                "## 学习证据\n\n用观察、表达和任务结果证明目标是否达成。",
+                "## 自我检查\n\n我能否说明关键信息，并在新情境中应用？",
+            ]
+        )
+        target["markdown"] = _layout_markdown(
+            target,
+            "本课学习目标",
+            objective_sections,
         )
 
     target = slide_at(9)
     if target:
         key_points = "；".join(plan.get("key_points", [])) or "围绕课题形成核心理解"
         difficult = "；".join(plan.get("difficult_points", [])) or "把所学迁移到新情境"
-        target["markdown"] = f"# 学习要点\n\n**重点：** {key_points}\n\n**难点：** {difficult}"
+        target["markdown"] = _layout_markdown(
+            target,
+            "学习要点",
+            [f"## 重点\n\n{key_points}", f"## 难点\n\n{difficult}"],
+        )
 
     for order, level in ((11, "基础"), (12, "巩固"), (13, "提高")):
         target = slide_at(order)
@@ -60,7 +98,7 @@ def compose_ppt_artifact(artifacts: dict[str, dict], theme: dict | None = None) 
                     f"\n\n**参考答案：** {item.get('answer', '')}"
                     f"\n\n**解析：** {item.get('explanation', '')}"
                 )
-            target["markdown"] = f"# {level}练习\n\n" + "\n\n".join(blocks)
+            target["markdown"] = _layout_markdown(target, f"{level}练习", blocks)
 
     stages = plan.get("stages", [])
     if len(slides) < 18:
@@ -94,6 +132,8 @@ def compose_ppt_artifact(artifacts: dict[str, dict], theme: dict | None = None) 
         })
 
     for slide in slides:
+        if slide.get("layout") not in theme_layouts:
+            slide["layout"] = default_layout
         if slide.get("slide_id") not in notes:
             note = {
                 "slide_id": slide.get("slide_id"),
@@ -120,6 +160,7 @@ def compose_ppt_artifact(artifacts: dict[str, dict], theme: dict | None = None) 
         deck["theme_preview_url"] = theme["preview_url"]
         deck["theme_source_url"] = theme["source_url"]
         deck["theme_layouts"] = theme["layouts"]
+        deck["theme_layout_capabilities"] = theme.get("layout_capabilities", [])
         deck["theme_design_guidance"] = theme["design_guidance"]
         deck["theme_image_strategy"] = theme["image_strategy"]
         deck["theme_density"] = theme["density"]
@@ -250,6 +291,12 @@ def run_generation_task(task_id: str) -> None:
             ),
             project.theme_id,
         )
+        capabilities = get_theme_capabilities(selected_theme["id"])
+        layout_capabilities = capabilities.get("layouts", [])
+        selected_theme["layouts"] = [
+            item["name"] for item in layout_capabilities if item.get("name")
+        ] or selected_theme["layouts"]
+        selected_theme["layout_capabilities"] = layout_capabilities
         context = LessonContext(
             project_id=project.id,
             subject=project.subject,
@@ -264,6 +311,8 @@ def run_generation_task(task_id: str) -> None:
             theme_name=selected_theme["name"],
             theme_description=selected_theme["description"],
             theme_layouts=selected_theme["layouts"],
+            theme_layout_capabilities=layout_capabilities,
+            theme_components=capabilities.get("components", []),
             theme_guidance=selected_theme["design_guidance"],
             theme_image_strategy=selected_theme["image_strategy"],
         )

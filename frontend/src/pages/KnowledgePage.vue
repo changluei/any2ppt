@@ -135,11 +135,12 @@ onUnmounted(() => clearTimeout(timer))
 </script>
 
 <template>
-  <section>
+  <section class="library-page knowledge-page">
     <div class="page-head">
       <div>
+        <span class="section-number">KNOWLEDGE BASE</span>
         <h2>资料知识库</h2>
-        <p>上传教材、课标或教案；检索结果保留文件名和原文位置。</p>
+        <p>上传教材、课标或教案，让每一页演示都有可靠依据。</p>
       </div>
       <el-select v-model="projectId" placeholder="选择备课项目" style="width: 270px">
         <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
@@ -237,6 +238,7 @@ onUnmounted(() => clearTimeout(timer))
 </template>
 
 <style scoped>
+.knowledge-page { width: min(1380px, calc(100% - 64px)); }
 .upload-zone { display: block; cursor: pointer; }
 .upload-zone.disabled { opacity: .6; pointer-events: none; }
 .selected-file { margin-top: 12px; font-weight: 600; overflow-wrap: anywhere; }

@@ -10,6 +10,7 @@ export function validateProject(form: ProjectInput): string | null {
 }
 
 export const workbenchPath = (projectId: string) => `/workbench/${projectId}`
+export const generationPath = '/generating'
 export const shouldPoll = (tasks: Task[]) => tasks.some(({ status }) => status === 'pending' || status === 'running')
 
 const errorLabels: Record<string, string> = {

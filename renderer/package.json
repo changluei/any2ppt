@@ -7,6 +7,9 @@
     "start": "node server.mjs"
   },
   "dependencies": {
+    "@iconify-json/la": "1.2.1",
+    "@iconify-json/logos": "1.2.11",
+    "@iconify-json/simple-icons": "1.2.92",
     "@slidev/cli": "52.18.0",
     "playwright-chromium": "1.61.1"
   }

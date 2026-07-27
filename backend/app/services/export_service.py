@@ -5,6 +5,7 @@ import json
 import shutil
 import uuid
 import zipfile
+from copy import deepcopy
 from pathlib import Path
 
 import httpx
@@ -12,8 +13,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import SessionLocal
-from app.models import ArtifactVersion, ExportJob, LessonArtifact, ProjectImage
-from app.services.theme_service import theme_catalog
+from app.models import ArtifactVersion, ExportJob, LessonArtifact, Project, ProjectImage
+from app.services.theme_service import get_theme, get_theme_capabilities, theme_catalog
 
 
 EXPORT_REQUIRED_TYPES = {
@@ -379,6 +380,28 @@ def create_export(job_id: str) -> None:
         versions = _load_versions(db, job)
         latest = {artifact_type: version.content for artifact_type, version in versions.items()}
         if job.package_type == "pptx":
+            project = db.get(Project, job.project_id)
+            theme = get_theme(project.theme_id) if project else None
+            if theme:
+                capabilities = get_theme_capabilities(theme["id"])
+                layout_capabilities = capabilities.get("layouts", [])
+                layouts = [item["name"] for item in layout_capabilities if item.get("name")] or theme["layouts"]
+                default_layout = "default" if "default" in layouts else layouts[0]
+                deck = deepcopy(latest["slide_deck"])
+                for slide in deck.get("slides", []):
+                    if slide.get("layout") not in layouts:
+                        slide["layout"] = default_layout
+                latest["slide_deck"] = {
+                    **deck,
+                    "theme": theme["package"],
+                    "theme_id": theme["id"],
+                    "theme_name": theme["name"],
+                    "theme_version": theme["version"],
+                    "theme_config": theme["theme_config"],
+                    "theme_palette": theme["palette"],
+                    "theme_layouts": layouts,
+                    "theme_layout_capabilities": layout_capabilities,
+                }
             pptx_path = root / f"{job.project_id}_{job.id}.pptx"
             tmp_pptx = tmp / pptx_path.name
             image_ids = {

@@ -23,6 +23,11 @@ export const api = {
   placeSlideImage: (id:string,data:{base_version_no:number;slide_id:string;image_id:string;position:string;caption:string}) => http.post(`/api/artifacts/${id}/images`,data).then(r=>objectData<Artifact>(r.data)),
   removeSlideImage: (id:string,placementId:string,baseVersionNo:number) => http.delete(`/api/artifacts/${id}/images/${placementId}`,{params:{base_version_no:baseVersionNo}}).then(r=>objectData<Artifact>(r.data)),
   versions: (id:string) => http.get(`/api/artifacts/${id}/versions`).then(r=>listData<Artifact>(r.data)),
+  previewUrl: (artifactId:string,slideId:string,versionNo:number) =>
+    new URL(
+      `/api/artifacts/${artifactId}/preview/${encodeURIComponent(slideId)}?version=${versionNo}`,
+      http.defaults.baseURL || window.location.origin,
+    ).toString(),
   rollback: (id:string,v:number) => http.post(`/api/artifacts/${id}/rollback/${v}`).then(r=>objectData<Artifact>(r.data)),
   graph: (id:string) => http.get(`/api/projects/${id}/graph`).then(r=>objectData<GraphState>(r.data)),
   startGraph: (id:string,taskId?:string) => http.post(`/api/projects/${id}/graph/runs`,{task_id:taskId}).then(r=>objectData<GraphState>(r.data)),

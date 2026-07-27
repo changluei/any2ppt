@@ -79,7 +79,8 @@ def _issue(issue_type: str, target_id: str, severity: str, suggestion: str) -> d
 def review_artifacts(artifacts: dict[str, dict]) -> list[dict]:
     issues: list[dict] = []
     plan = artifacts.get("lesson_plan", {})
-    slides = artifacts.get("slide_deck", {}).get("slides", [])
+    deck = artifacts.get("slide_deck", {})
+    slides = deck.get("slides", [])
     notes = artifacts.get("speaker_notes", {}).get("notes", [])
     exercises = artifacts.get("exercise_set", {}).get("exercises", [])
 
@@ -106,6 +107,22 @@ def review_artifacts(artifacts: dict[str, dict]) -> list[dict]:
 
     if not 12 <= len(slides) <= 18:
         issues.append(_issue("slide_count", "slide_deck", "fail", "课件页数应保持在 12—18 页"))
+    theme_layouts = set(deck.get("theme_layouts", []))
+    if theme_layouts:
+        invalid_layouts = [
+            slide.get("slide_id", "unknown-slide")
+            for slide in slides
+            if slide.get("layout") not in theme_layouts
+        ]
+        for slide_id in invalid_layouts:
+            issues.append(_issue("invalid_theme_layout", slide_id, "fail", "改用当前主题真实提供的布局"))
+        used_layouts = [slide.get("layout") for slide in slides if slide.get("layout")]
+        if len(theme_layouts) >= 4:
+            if len(set(used_layouts)) < 4:
+                issues.append(_issue("layout_homogeneity", "slide_deck", "fail", "至少使用四种与页面语义匹配的主题布局"))
+            default_count = sum(layout == "default" for layout in used_layouts)
+            if used_layouts and default_count > int(len(used_layouts) * 0.4):
+                issues.append(_issue("default_layout_overuse", "slide_deck", "fail", "减少 default，改用主题的分栏、章节、网格或强调布局"))
     slide_ids = [slide.get("slide_id") for slide in slides]
     stage_ids = {stage.get("id") for stage in stages if stage.get("id")}
     if len(set(slide_ids)) != len(slide_ids):
@@ -120,6 +137,9 @@ def review_artifacts(artifacts: dict[str, dict]) -> list[dict]:
         if slide_id not in note_ids:
             issues.append(_issue("missing_note", slide_id, "fail", "补充与该页对应的逐页讲稿"))
         markdown = slide.get("markdown", "")
+        for slot in slide.get("layout_slots", []):
+            if slot != "default" and f"::{slot}::" not in markdown:
+                issues.append(_issue("missing_layout_slot", slide_id, "fail", f"为 {slide.get('layout')} 布局补充 {slot} 区域"))
         if len(markdown) > 600 or len([line for line in markdown.splitlines() if line.strip()]) > 12:
             issues.append(_issue("slide_density", slide_id, "warn", "拆分页面或精简投影文字"))
     for orphan in sorted(note_ids - set(slide_ids)):
@@ -195,7 +215,17 @@ def _repair_scope(issues: list[dict]) -> str:
     failing = {item["issue_type"] for item in issues if item.get("severity") == "fail"}
     if failing & {"objective_without_activity", "objective_unassessed", "unknown_objective"}:
         return "design"
-    if failing & {"slide_count", "duplicate_slide_id", "slide_density", "slide_unknown_objective", "slide_unknown_stage"}:
+    if failing & {
+        "slide_count",
+        "duplicate_slide_id",
+        "slide_density",
+        "slide_unknown_objective",
+        "slide_unknown_stage",
+        "invalid_theme_layout",
+        "layout_homogeneity",
+        "default_layout_overuse",
+        "missing_layout_slot",
+    }:
         return "slides"
     if failing & {
         "missing_note", "orphan_note", "missing_exercise_level", "exercise_answer_missing",

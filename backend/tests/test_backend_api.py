@@ -57,7 +57,31 @@ def test_health_and_project_crud(client):
     assert client.get("/health/chroma").status_code == 200
     themes = client.get("/api/themes")
     assert themes.status_code == 200
-    assert {item["id"] for item in themes.json()} == {"default", "seriph", "apple-basic", "bricks", "tahta"}
+    assert {item["id"] for item in themes.json()} == {
+        "default",
+        "seriph",
+        "apple-basic",
+        "bricks",
+        "tahta",
+        "academic",
+        "dracula",
+        "neversink",
+        "nord",
+        "light-icons",
+        "shibainu",
+        "flayyer",
+        "eloc",
+        "purplin",
+        "unicorn",
+        "zhozhoba",
+        "penguin",
+        "vuetiful",
+        "nearform",
+        "nutmeg",
+        "neocarbon",
+        "geist",
+        "frankfurt",
+    }
     recommendation = client.post(
         "/api/themes/recommend",
         json={
@@ -150,6 +174,9 @@ def test_selected_tahta_theme_controls_slide_layouts(client):
     assert deck["theme_id"] == "tahta"
     assert deck["theme_config"]["variant"] == "notebook"
     assert {slide["layout"] for slide in deck["slides"]} <= set(deck["theme_layouts"])
+    assert deck["theme_layout_capabilities"]
+    assert len({slide["layout"] for slide in deck["slides"]}) >= 4
+    assert sum(slide["layout"] == "default" for slide in deck["slides"]) <= int(len(deck["slides"]) * 0.4)
 
 
 def test_source_task_graph_and_export_flow(client):
@@ -447,7 +474,10 @@ def test_version_metadata_rollback_and_student_privacy(client):
     assert "presentationml.presentation" in pptx_download.headers["content-type"]
     pptx_archive = zipfile.ZipFile(io.BytesIO(pptx_download.content))
     assert "ppt/slides/slide1.xml" in pptx_archive.namelist()
-    assert any(name.startswith("ppt/media/image") for name in pptx_archive.namelist())
+    assert any(
+        name.startswith("ppt/media/") and not name.endswith("/")
+        for name in pptx_archive.namelist()
+    )
 
     removed = client.delete(
         f"/api/artifacts/{slide_deck['artifact_id']}/images/{placement_id}",

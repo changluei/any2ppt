@@ -20,6 +20,16 @@ class RetrievalHit(Citation):
     content_hash: str = ""
 
 
+class ThemeLayoutCapability(BaseModel):
+    name: str = Field(min_length=1)
+    slots: list[str] = Field(default_factory=lambda: ["default"])
+    props: list[str] = Field(default_factory=list)
+    usage: str = ""
+    markdown_pattern: str = ""
+    supports_images: bool = False
+    structural: bool = False
+
+
 class LessonContext(BaseModel):
     project_id: str = Field(min_length=1)
     subject: str = Field(min_length=1)
@@ -34,6 +44,8 @@ class LessonContext(BaseModel):
     theme_name: str = ""
     theme_description: str = ""
     theme_layouts: list[str] = Field(default_factory=lambda: ["default"])
+    theme_layout_capabilities: list[ThemeLayoutCapability] = Field(default_factory=list)
+    theme_components: list[str] = Field(default_factory=list)
     theme_guidance: str = ""
     theme_image_strategy: str = ""
 
@@ -116,6 +128,9 @@ class Slide(BaseModel):
     teaching_stage: str
     objective_ids: list[str] = Field(default_factory=list)
     citations: list[Citation] = Field(default_factory=list)
+    visual_intent: str = ""
+    content_blocks: list[dict[str, Any]] = Field(default_factory=list)
+    layout_slots: list[str] = Field(default_factory=lambda: ["default"])
 
 
 class SpeakerNote(BaseModel):

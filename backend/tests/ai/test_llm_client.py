@@ -68,6 +68,9 @@ def test_structured_output_repairs_once_and_keeps_trace_id():
     assert result.trace_id == "trace-json"
     assert len(sdk.chat.completions.calls) == 2
     assert all(call["response_format"] == {"type": "json_object"} for call in sdk.chat.completions.calls)
+    first_prompt = sdk.chat.completions.calls[0]["messages"][1]["content"]
+    assert "目标 JSON Schema" in first_prompt
+    assert "requirements" in first_prompt
 
 
 def test_structured_output_fails_after_single_repair():

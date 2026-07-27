@@ -8,6 +8,8 @@ from app.ai.embeddings import HashEmbeddingProvider
 from app.ai.evaluation import GoldenQuery, evaluate_retrieval
 from app.ai.exceptions import IngestionError
 from app.ai.ingestion import Chunk, parse_document, split_blocks
+from app.ai.retriever import retrieve_evidence
+from app.ai.schemas import LessonContext
 from app.ai.vector_store import ProjectVectorStore
 
 
@@ -101,6 +103,26 @@ def test_json_store_is_idempotent_deletable_and_project_isolated(tmp_path: Path)
     store.delete_by_source("project-a", "source-a")
     assert store.count("project-a") == 0
     assert store.count("project-b") == 1
+
+
+def test_explicitly_selected_source_is_read_even_when_query_words_do_not_overlap(tmp_path: Path):
+    store = ProjectVectorStore(tmp_path, force_json=True)
+    store.add_documents(
+        "selected-project",
+        "source-a",
+        "用户资料.md",
+        [Chunk("selected-chunk", "这是一份用户明确要求参考的内部材料。", "第 1 行", "selected-hash")],
+    )
+    context = LessonContext(
+        project_id="selected-project",
+        subject="综合",
+        grade="通用",
+        lesson_topic="完全不同的查询",
+        selected_source_ids=["source-a"],
+    )
+    evidence = retrieve_evidence(context, "不相干的检索词", store=store)
+    assert evidence.rows
+    assert evidence.rows[0]["source_id"] == "source-a"
 
 
 def test_real_chroma_persists_and_filters_source(tmp_path: Path):

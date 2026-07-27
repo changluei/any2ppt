@@ -4,11 +4,11 @@ import pytest
 
 from app.ai.cache import GenerationCache, build_cache_key
 from app.ai.evaluation import evaluate_router
-from app.ai.generation import generate_lesson_bundle, revise_block
+from app.ai.generation import LocalRevisionOutput, generate_lesson_bundle, revise_block
 from app.ai.graph import review_artifacts
 from app.ai.ingestion import Chunk
 from app.ai.llm_client import LLMResult, _extract_json
-from app.ai.schemas import LessonContext, SkillRequest
+from app.ai.schemas import LessonContext, SkillRequest, ThemeLayoutCapability
 from app.ai.skills import CourseStandardOutput, registry, route_intent, run_skill
 from app.ai.vector_store import ProjectVectorStore
 
@@ -111,6 +111,54 @@ def test_full_bundle_comes_from_one_blueprint_and_is_aligned(tmp_path: Path, con
     assert not [issue for issue in review_artifacts(bundle.artifacts) if issue["severity"] == "fail"]
 
 
+def test_theme_capability_manifest_drives_diverse_valid_layouts_and_named_slots(tmp_path: Path):
+    capabilities = [
+        ThemeLayoutCapability(name="cover", slots=["default"], usage="封面"),
+        ThemeLayoutCapability(name="default", slots=["default"], usage="正文"),
+        ThemeLayoutCapability(
+            name="four-cell",
+            slots=["top-left", "top-right", "bottom-left", "bottom-right"],
+            usage="四项并列",
+            structural=True,
+        ),
+        ThemeLayoutCapability(
+            name="side-title",
+            slots=["title", "content", "default"],
+            usage="侧边标题",
+            structural=True,
+        ),
+        ThemeLayoutCapability(
+            name="top-title-two-cols",
+            slots=["title", "left", "right", "default"],
+            usage="顶部标题双栏",
+            structural=True,
+        ),
+        ThemeLayoutCapability(name="quote", slots=["default"], usage="引用"),
+        ThemeLayoutCapability(name="section", slots=["default"], usage="章节"),
+    ]
+    themed_context = LessonContext(
+        project_id="project-theme",
+        subject="科学",
+        grade="四年级",
+        lesson_topic="水的蒸发",
+        theme_id="neversink",
+        theme_layouts=[item.name for item in capabilities],
+        theme_layout_capabilities=capabilities,
+        theme_guidance="避免连续使用 default，并根据页面语义选择结构化布局。",
+    )
+    bundle = generate_lesson_bundle(
+        themed_context,
+        store=ProjectVectorStore(tmp_path, force_json=True),
+    )
+    slides = bundle.artifacts["slide_deck"]["slides"]
+    layouts = [slide["layout"] for slide in slides]
+    assert set(layouts) <= set(themed_context.theme_layouts)
+    assert len(set(layouts)) >= 4
+    assert layouts.count("default") <= int(len(layouts) * 0.4)
+    assert any("::title::" in slide["markdown"] for slide in slides)
+    assert all(slide["layout_slots"] for slide in slides)
+
+
 def test_local_revision_changes_only_target_slide(tmp_path: Path, context):
     bundle = generate_lesson_bundle(context, store=ProjectVectorStore(tmp_path, force_json=True))
     original = bundle.artifacts["slide_deck"]
@@ -119,6 +167,33 @@ def test_local_revision_changes_only_target_slide(tmp_path: Path, context):
     assert updated["slides"][0] == original["slides"][0]
     assert updated["slides"][1] != original["slides"][1]
     assert updated["slides"][2:] == original["slides"][2:]
+
+
+class NoOpRevisionLLM:
+    configured = True
+
+    @staticmethod
+    def invoke_structured(system, user, output_model, trace_id=None):
+        assert output_model is LocalRevisionOutput
+        return (
+            LocalRevisionOutput(changed_block={}),
+            LLMResult("{}", "fake-model", 3, attempts=1, trace_id=trace_id or "trace"),
+        )
+
+
+def test_no_op_ai_revision_falls_back_to_a_real_local_change(tmp_path: Path, context):
+    bundle = generate_lesson_bundle(context, store=ProjectVectorStore(tmp_path, force_json=True))
+    original = bundle.artifacts["slide_deck"]
+    updated, changed_ids = revise_block(
+        original,
+        "slide",
+        "SLIDE-02",
+        "请精简页面文字",
+        llm=NoOpRevisionLLM(),
+    )
+    assert changed_ids == ["SLIDE-02"]
+    assert updated["slides"][1] != original["slides"][1]
+    assert updated["slides"][1]["revision_mode"] == "rule-based-fallback"
 
 
 def test_exercise_revision_changes_difficulty_and_marks_review(tmp_path: Path, context):
