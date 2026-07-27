@@ -11,10 +11,12 @@ from app.ai.vector_store import ProjectVectorStore
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.models import AITask, ExportJob, LessonArtifact, Project
-from app.repositories.projects import get_project, list_projects, project_delete_blockers, ready_source_ids
+from app.repositories.projects import get_project, list_projects, project_delete_blockers
 from app.schemas.api import ArtifactOut, ProjectCreate, ProjectOut, TaskCreate, TaskOut
 from app.services.artifact_service import artifact_out, run_generation_task
 from app.services.theme_service import delete_project_theme, get_theme, prepare_project_theme
+from app.services.knowledge_base_service import ensure_knowledge_bases, validate_knowledge_base_ids
+from app.models import SourceDocument
 from app.ai.skills import SKILLS
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -30,6 +32,11 @@ def list_projects_route(db: Session = Depends(get_db)):
 def create_project(data: ProjectCreate, db: Session = Depends(get_db)):
     if not get_theme(data.theme_id):
         raise HTTPException(400, detail={"code": "THEME_NOT_FOUND", "message": "所选模板不存在或尚未通过兼容检查"})
+    ensure_knowledge_bases(db)
+    try:
+        validate_knowledge_base_ids(db, data.knowledge_base_ids, require_ready=False)
+    except ValueError as exc:
+        raise HTTPException(400, detail={"code": "KNOWLEDGE_BASE_NOT_FOUND", "message": str(exc)}) from exc
     project = Project(**data.model_dump())
     db.add(project)
     db.commit()
@@ -59,6 +66,10 @@ def update_project(project_id: str, data: ProjectCreate, db: Session = Depends(g
         raise HTTPException(404, detail={"code": "PROJECT_NOT_FOUND", "message": "项目不存在"})
     if not get_theme(data.theme_id):
         raise HTTPException(400, detail={"code": "THEME_NOT_FOUND", "message": "所选模板不存在或尚未通过兼容检查"})
+    try:
+        validate_knowledge_base_ids(db, data.knowledge_base_ids, require_ready=False)
+    except ValueError as exc:
+        raise HTTPException(400, detail={"code": "KNOWLEDGE_BASE_NOT_FOUND", "message": str(exc)}) from exc
     theme_changed = project.theme_id != data.theme_id
     for key, value in data.model_dump().items():
         setattr(project, key, value)
@@ -99,6 +110,11 @@ def delete_project(project_id: str, force: bool = Query(False), db: Session = De
         for row in db.query(ExportJob).filter_by(project_id=project_id).all()
         if row.file_path
     ]
+    db.query(SourceDocument).filter(SourceDocument.project_id == project_id).update(
+        {SourceDocument.project_id: None},
+        synchronize_session=False,
+    )
+    db.commit()
     db.delete(project)
     db.commit()
     try:
@@ -145,13 +161,27 @@ def create_task(project_id: str, data: TaskCreate, request: Request, background:
         raise HTTPException(400, detail={"code": "UNKNOWN_TASK_TYPE", "message": "未知的生成任务类型"})
     requested_sources = list(data.selected_source_ids)
     if requested_sources:
-        ready = set(ready_source_ids(db, project_id, requested_sources))
+        ready = {
+            row[0]
+            for row in db.query(SourceDocument.id).filter(
+                SourceDocument.id.in_(requested_sources),
+                SourceDocument.knowledge_base_id == "personal",
+                SourceDocument.status == "ready",
+            ).all()
+        }
         missing = [source_id for source_id in requested_sources if source_id not in ready]
         if missing:
             raise HTTPException(
                 409,
                 detail={"code": "SOURCE_NOT_READY", "message": "选中的资料尚未完成索引", "source_ids": missing},
             )
+    requested_libraries = list(data.selected_knowledge_base_ids or project.knowledge_base_ids or [])
+    try:
+        requested_libraries = validate_knowledge_base_ids(db, requested_libraries)
+    except ValueError as exc:
+        raise HTTPException(400, detail={"code": "KNOWLEDGE_BASE_NOT_FOUND", "message": str(exc)}) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, detail={"code": "KNOWLEDGE_BASE_NOT_READY", "message": str(exc)}) from exc
     existing = db.query(AITask).filter_by(project_id=project_id, idempotency_key=data.idempotency_key).first()
     if existing:
         return existing
@@ -160,7 +190,12 @@ def create_task(project_id: str, data: TaskCreate, request: Request, background:
         type=data.type,
         trace_id=getattr(request.state, "trace_id", str(uuid.uuid4())),
         idempotency_key=data.idempotency_key,
-        input_snapshot={"selected_source_ids": requested_sources, "teacher_requirements": data.teacher_requirements, "type": data.type},
+        input_snapshot={
+            "selected_source_ids": requested_sources,
+            "selected_knowledge_base_ids": requested_libraries,
+            "teacher_requirements": data.teacher_requirements,
+            "type": data.type,
+        },
     )
     db.add(task)
     db.commit()

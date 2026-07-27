@@ -6,6 +6,7 @@ import { canExport, canRetryTask, citationAvailable, currentTaskId, elapsedText,
 const form: ProjectInput = {
   name: '测试项目', subject: '语文', grade: '三年级', textbook_version: '',
   lesson_topic: '测试课题', lesson_count: 1, student_profile: '', teacher_requirements: '', theme_id: 'seriph',
+  knowledge_base_ids: [],
 }
 
 describe('day 3 workbench helpers', () => {

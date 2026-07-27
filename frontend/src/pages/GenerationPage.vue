@@ -4,6 +4,7 @@ import { ArrowLeft, RefreshRight } from '@element-plus/icons-vue'
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import { api } from '../api'
 import { sourcesApi } from '../api/sources'
+import { knowledgeBasesApi } from '../api/knowledgeBases'
 import type { Project, Source, Task } from '../types'
 import {
   beginGenerationSession,
@@ -60,21 +61,14 @@ async function uploadSources(current: GenerationSession, projectId: string) {
   }
 
   if (uploadedIds.length < current.expectedFileCount) {
-    const existing = await sourcesApi.list(projectId)
-    const recoverable = existing.filter((item) => item.status !== 'failed')
-    if (recoverable.length < current.expectedFileCount) {
-      throw new Error('页面刷新后有本地资料尚未上传，请返回重新选择资料')
-    }
-    uploadedIds = recoverable.map((item) => item.id)
-    updateGenerationSession({ uploadedSourceIds: uploadedIds })
+    throw new Error('页面刷新时仍有本地资料尚未上传，请返回重新选择资料')
   }
 
   if (!uploadedIds.length) return []
   stage.value = '正在解析资料并建立知识索引'
   localProgress.value = 30
   for (let attempt = 0; attempt < 180 && !stopped; attempt += 1) {
-    const rows = await sourcesApi.list(projectId)
-    const selected = rows.filter((item) => uploadedIds.includes(item.id))
+    const selected = await Promise.all(uploadedIds.map((id) => knowledgeBasesApi.source(id)))
     const failed = selected.find((item) => item.status === 'failed')
     if (failed) throw new Error(`${failed.original_name} 处理失败：${failed.error_message || '无法建立索引'}`)
     if (selected.length === uploadedIds.length && selected.every((item: Source) => item.status === 'ready')) {
@@ -152,11 +146,16 @@ async function runGeneration() {
     phase.value = 0
     const uploadedIds = await uploadSources(getGenerationSession() || current, projectId)
     const selectedSourceIds = [...new Set([...current.sourceIds, ...uploadedIds])]
+    const selectedKnowledgeBaseIds = [...new Set([
+      ...(current.knowledgeBaseIds || project.value?.knowledge_base_ids || []),
+      ...(uploadedIds.length ? ['personal'] : []),
+    ])]
     stage.value = '正在启动 AI 生成引擎'
     localProgress.value = 37
     const createdTask = await api.createTask(projectId, {
       type: 'full_lesson',
       selected_source_ids: selectedSourceIds,
+      selected_knowledge_base_ids: selectedKnowledgeBaseIds,
       teacher_requirements: current.prompt,
       idempotency_key: current.idempotencyKey,
     })
@@ -177,6 +176,7 @@ async function retry() {
     projectId: project.value.id,
     prompt: project.value.teacher_requirements,
     sourceIds: session.value?.sourceIds || [],
+    knowledgeBaseIds: project.value.knowledge_base_ids,
   })
   restored.taskId = task.value.id
   updateGenerationSession({ taskId: task.value.id })

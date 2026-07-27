@@ -3,10 +3,10 @@ from __future__ import annotations
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
-from app.ai.vector_store import ProjectVectorStore
 from app.core.database import get_db
 from app.models import Project, SourceDocument
 from app.schemas.api import SearchRequest, SearchResult, SourceOut
+from app.services.knowledge_base_service import search_knowledge_bases
 from app.services.source_service import delete_source, index_source, save_upload
 
 router = APIRouter(prefix="/api/projects/{project_id}", tags=["sources"])
@@ -32,7 +32,8 @@ async def upload_source(
         source = save_upload(db, project_id, file.filename or "unnamed", file.content_type or "", await file.read())
     except ValueError as exc:
         raise HTTPException(400, detail={"code": "INVALID_SOURCE_FILE", "message": str(exc)}) from exc
-    background.add_task(index_source, source.id)
+    if source.status != "ready":
+        background.add_task(index_source, source.id)
     return source
 
 
@@ -77,4 +78,12 @@ def search(project_id: str, data: SearchRequest, db: Session = Depends(get_db)):
         raise HTTPException(404, detail={"code": "PROJECT_NOT_FOUND", "message": "项目不存在"})
     if not db.query(SourceDocument).filter_by(project_id=project_id, status="ready").first():
         raise HTTPException(409, detail={"code": "SOURCE_NOT_READY", "message": "没有已完成索引的资料"})
-    return ProjectVectorStore().similarity_search(project_id, data.query, data.top_k, data.source_ids)
+    source_ids = data.source_ids or [
+        row[0]
+        for row in db.query(SourceDocument.id).filter_by(
+            project_id=project_id,
+            knowledge_base_id="personal",
+            status="ready",
+        ).all()
+    ]
+    return search_knowledge_bases(["personal"], data.query, data.top_k, source_ids)

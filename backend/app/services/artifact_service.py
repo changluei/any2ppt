@@ -306,6 +306,10 @@ def run_generation_task(task_id: str) -> None:
             lesson_count=project.lesson_count,
             student_profile=project.student_profile,
             selected_source_ids=task.input_snapshot.get("selected_source_ids", []),
+            selected_knowledge_base_ids=task.input_snapshot.get(
+                "selected_knowledge_base_ids",
+                project.knowledge_base_ids or [],
+            ),
             teacher_requirements=task.input_snapshot.get("teacher_requirements") or project.teacher_requirements,
             theme_id=selected_theme["id"],
             theme_name=selected_theme["name"],

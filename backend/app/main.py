@@ -10,10 +10,12 @@ from sqlalchemy import text
 from app.ai.skills import registry
 from app.ai.schemas import LessonContext
 from app.ai.vector_store import ProjectVectorStore
-from app.api.routes import artifacts, images, projects, sources, tasks, workflow
+from app.api.routes import artifacts, images, knowledge_bases, projects, sources, tasks, workflow
 from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.services.recovery_service import recover_interrupted_work
+from app.services.knowledge_base_service import ensure_knowledge_bases
+from app.services.source_service import migrate_legacy_personal_indexes
 from app.schemas.api import ThemeRecommendationRequest
 from app.services.theme_service import public_themes, select_theme
 
@@ -22,6 +24,9 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    with SessionLocal() as db:
+        ensure_knowledge_bases(db)
+    migrate_legacy_personal_indexes()
     recover_interrupted_work()
     yield
 
@@ -166,6 +171,7 @@ def recommend_theme(data: ThemeRecommendationRequest):
 
 app.include_router(projects.router)
 app.include_router(sources.router)
+app.include_router(knowledge_bases.router)
 app.include_router(images.router)
 app.include_router(tasks.router)
 app.include_router(artifacts.router)

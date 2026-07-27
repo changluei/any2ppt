@@ -9,6 +9,7 @@ from app.ai.ingestion import parse_document, split_blocks
 from app.ai.vector_store import ProjectVectorStore
 from app.core.config import get_settings
 from app.models import SourceDocument
+from app.services.knowledge_base_service import ensure_knowledge_bases
 
 
 ALLOWED = {
@@ -27,7 +28,13 @@ def safe_filename(name: str) -> str:
     return value[:200]
 
 
-def save_upload(db: Session, project_id: str, filename: str, content_type: str, data: bytes) -> SourceDocument:
+def save_upload(
+    db: Session,
+    project_id: str | None,
+    filename: str,
+    content_type: str,
+    data: bytes,
+) -> SourceDocument:
     settings = get_settings()
     clean = safe_filename(filename)
     suffix = Path(clean).suffix.lower()
@@ -40,16 +47,18 @@ def save_upload(db: Session, project_id: str, filename: str, content_type: str, 
     if content_type and content_type not in ALLOWED[suffix]:
         raise ValueError("文件类型与扩展名不匹配")
     digest = hashlib.sha256(data).hexdigest()
-    exists = db.query(SourceDocument).filter_by(project_id=project_id, sha256=digest).first()
+    ensure_knowledge_bases(db)
+    exists = db.query(SourceDocument).filter_by(knowledge_base_id="personal", sha256=digest).first()
     if exists:
-        raise ValueError("同一项目中已存在相同文件")
-    project_dir = settings.upload_dir / project_id
-    project_dir.mkdir(parents=True, exist_ok=True)
+        return exists
+    library_dir = settings.upload_dir / "personal"
+    library_dir.mkdir(parents=True, exist_ok=True)
     stored = f"{uuid.uuid4().hex}{suffix}"
-    path = project_dir / stored
+    path = library_dir / stored
     path.write_bytes(data)
     source = SourceDocument(
         project_id=project_id,
+        knowledge_base_id="personal",
         original_name=clean,
         stored_name=stored,
         media_type=content_type or ALLOWED[suffix][0],
@@ -83,10 +92,11 @@ def index_source(source_id: str) -> None:
         db.commit()
         settings = get_settings()
         chunks = split_blocks(blocks, source.id, settings.ai_chunk_size, settings.ai_chunk_overlap)
-        ProjectVectorStore().add_documents(source.project_id, source.id, source.original_name, chunks)
+        ProjectVectorStore().add_documents("personal", source.id, source.original_name, chunks)
         source.status = "ready"
         source.error_message = None
         db.commit()
+        ensure_knowledge_bases(db)
     except Exception as exc:
         db.rollback()
         source = db.get(SourceDocument, source_id)
@@ -98,9 +108,32 @@ def index_source(source_id: str) -> None:
         db.close()
 
 
+def migrate_legacy_personal_indexes() -> int:
+    """Copy ready project-era documents into the durable personal namespace once."""
+    from app.core.database import SessionLocal
+
+    db = SessionLocal()
+    store = ProjectVectorStore()
+    try:
+        source_ids = [
+            row[0]
+            for row in db.query(SourceDocument.id).filter_by(
+                knowledge_base_id="personal",
+                status="ready",
+            ).all()
+            if store.count("personal", row[0]) == 0
+        ]
+    finally:
+        store.close()
+        db.close()
+    for source_id in source_ids:
+        index_source(source_id)
+    return len(source_ids)
+
+
 def delete_source(db: Session, source: SourceDocument) -> None:
     try:
-        ProjectVectorStore().delete_by_source(source.project_id, source.id)
+        ProjectVectorStore().delete_by_source(source.knowledge_base_id, source.id)
     except Exception as exc:
         source.status = "failed"
         source.error_message = f"向量删除失败：{exc}"[:500]
@@ -115,4 +148,4 @@ def delete_source(db: Session, source: SourceDocument) -> None:
         raise RuntimeError("FILE_DELETE_FAILED") from exc
     db.delete(source)
     db.commit()
-
+    ensure_knowledge_bases(db)

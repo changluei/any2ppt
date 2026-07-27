@@ -33,6 +33,21 @@ docker compose --env-file .env -f deploy/docker-compose.yml up --build
 docker compose --env-file .env -f deploy/docker-compose.yml down
 ```
 
+## 四个持久知识库
+
+系统固定提供“官方语文、官方数学、官方英语、个人”四个知识库。创建 PPT 时可多选；生成任务会同时检索所选库。用户上传的 PDF、DOCX、TXT 或 Markdown 会自动去重并持续归档到个人知识库，删除演示项目不会删除这些个人资料。
+
+三科官方资料使用 `data/datasets/model_ready/primary_school_chunks.jsonl`，Docker 以只读方式挂载原始数据。首次构建索引或需要从头重建时执行：
+
+```bash
+docker compose --env-file .env -f deploy/docker-compose.yml exec backend \
+  python scripts/import_official_knowledge_bases.py --reset
+```
+
+不加 `--reset` 可安全续跑或重复导入，固定片段 ID 会通过 Chroma upsert 复用，不会生成重复向量。MySQL 只保存四个知识库的状态和统计数据，向量索引继续保存在 `app_data` 卷中。
+
+需要把已经构建好的四个知识库交给另一台电脑时，请按照 [知识库交接说明](data/README.md) 导出和导入独立迁移包；不要把数 GB 的知识库压缩包提交到 GitHub。
+
 ## 本地开发
 
 后端：

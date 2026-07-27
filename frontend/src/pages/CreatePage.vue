@@ -4,7 +4,7 @@ import { ArrowRight, Check, CloseBold, Document, MagicStick, UploadFilled } from
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
-import type { ProjectInput, ThemeDescriptor } from '../types'
+import type { KnowledgeBase, ProjectInput, ThemeDescriptor } from '../types'
 import AppError from '../components/AppError.vue'
 import AppLoading from '../components/AppLoading.vue'
 import ThemePreview from '../components/ThemePreview.vue'
@@ -19,6 +19,7 @@ const route = useRoute()
 const router = useRouter()
 const projectStore = useProjectStore()
 const themes = ref<ThemeDescriptor[]>([])
+const knowledgeBases = ref<KnowledgeBase[]>([])
 const loading = ref(true)
 const error = ref('')
 const saving = ref(false)
@@ -40,6 +41,7 @@ const blankForm = (): ProjectInput => ({
   student_profile: '',
   teacher_requirements: '',
   theme_id: '',
+  knowledge_base_ids: ['personal'],
 })
 const form = reactive<ProjectInput>(blankForm())
 
@@ -65,7 +67,10 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    themes.value = await api.themes()
+    ;[themes.value, knowledgeBases.value] = await Promise.all([
+      api.themes(),
+      import('../api/knowledgeBases').then(({ knowledgeBasesApi }) => knowledgeBasesApi.list()),
+    ])
     const projectId = String(route.query.edit || '')
     if (projectId) {
       const project = await api.project(projectId)
@@ -80,6 +85,7 @@ async function load() {
         student_profile: project.student_profile,
         teacher_requirements: project.teacher_requirements,
         theme_id: project.theme_id,
+        knowledge_base_ids: [...project.knowledge_base_ids],
       })
       prompt.value = project.teacher_requirements || project.lesson_topic
       await nextTick()
@@ -161,6 +167,7 @@ async function saveAndGenerate() {
       prompt: description,
       form: { ...form },
       files: selectedFiles.value,
+      knowledgeBaseIds: form.knowledge_base_ids,
     })
     await router.push(generationPath)
   } catch (requestError) {
@@ -268,10 +275,31 @@ onMounted(load)
             placeholder="例如：2026 年新能源汽车市场趋势"
           />
 
+          <div class="create-step-head description-head">
+            <span>02</span>
+            <div><b>选择知识库</b><small>可多选；AI 会同时检索所选资料并标注引用依据</small></div>
+          </div>
+          <el-checkbox-group v-model="form.knowledge_base_ids" class="generation-kb-grid">
+            <el-checkbox
+              v-for="library in knowledgeBases"
+              :key="library.id"
+              :value="library.id"
+              :disabled="library.status === 'importing' || library.status === 'failed'"
+              border
+            >
+              <span class="generation-kb-copy">
+                <b>{{ library.name }}</b>
+                <small>
+                  {{ library.status === 'importing' ? '正在导入' : library.status === 'failed' ? '暂不可用' : `${library.chunk_count.toLocaleString()} 个知识片段` }}
+                </small>
+              </span>
+            </el-checkbox>
+          </el-checkbox-group>
+
           <template v-if="!editingId">
             <div class="create-step-head">
-              <span>02</span>
-              <div><b>添加自己的资料</b><small>可选，不上传也可以直接生成</small></div>
+              <span>03</span>
+              <div><b>添加自己的资料</b><small>可选；上传后会自动沉淀到个人知识库</small></div>
             </div>
             <label
               class="prompt-upload"
@@ -292,7 +320,7 @@ onMounted(load)
           </template>
 
           <div class="create-step-head description-head">
-            <span>{{ editingId ? '02' : '03' }}</span>
+            <span>{{ editingId ? '03' : '04' }}</span>
             <div><b>描述演示需求</b><small>主题、受众、页数、重点和表达方式都可以写在这里</small></div>
           </div>
           <el-input

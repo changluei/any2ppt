@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 
 from app.core.config import get_settings
+from app.services.knowledge_base_service import search_knowledge_bases
 
 from .schemas import Citation, LessonContext
 from .vector_store import ProjectVectorStore
@@ -57,18 +58,32 @@ def retrieve_evidence(
 ) -> EvidenceSet:
     settings = get_settings()
     vector_store = store or ProjectVectorStore()
-    threshold = (
-        0.0
-        if context.selected_source_ids
-        else settings.ai_min_score if min_score is None else min_score
+    library_ids = list(context.selected_knowledge_base_ids)
+    if context.selected_source_ids and "personal" not in library_ids:
+        library_ids.append("personal")
+    threshold = 0.0 if context.selected_source_ids else settings.ai_min_score if min_score is None else min_score
+    rows = (
+        search_knowledge_bases(
+            library_ids,
+            query,
+            top_k=top_k or settings.ai_top_k,
+            source_ids=context.selected_source_ids or None,
+            store=vector_store,
+            min_score=threshold,
+        )
+        if library_ids
+        else []
     )
-    rows = vector_store.similarity_search(
-        context.project_id,
-        query,
-        top_k=top_k or settings.ai_top_k,
-        source_ids=context.selected_source_ids or None,
-        min_score=threshold,
-    )
+    # Compatibility path for documents indexed before the durable personal library
+    # migration. New uploads are always indexed into ``personal``.
+    if not rows:
+        rows = vector_store.similarity_search(
+            context.project_id,
+            query,
+            top_k=top_k or settings.ai_top_k,
+            source_ids=context.selected_source_ids or None,
+            min_score=threshold,
+        )
     warnings: list[str] = []
     sufficient = bool(rows) and max(row["score"] for row in rows) >= max(settings.ai_min_score, 0.12)
     if not rows:

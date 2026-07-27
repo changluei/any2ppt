@@ -52,6 +52,10 @@ def _context_for(project: Project, task: AITask) -> LessonContext:
         lesson_count=project.lesson_count,
         student_profile=project.student_profile,
         selected_source_ids=snapshot.get("selected_source_ids", []),
+        selected_knowledge_base_ids=snapshot.get(
+            "selected_knowledge_base_ids",
+            project.knowledge_base_ids or [],
+        ),
         teacher_requirements=snapshot.get("teacher_requirements") or project.teacher_requirements,
     )
     selected_theme = select_theme(base, project.theme_id)

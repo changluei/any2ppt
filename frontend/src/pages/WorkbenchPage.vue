@@ -101,9 +101,9 @@ async function load() {
       chatMessages.value.push({
         id: crypto.randomUUID(),
         role: 'assistant',
-        text: readySources.value.length
-          ? `我已经连接本项目的 ${readySources.value.length} 份资料。你可以直接告诉我修改哪一页，也可以附一张图片让我放进指定页面。`
-          : '这份演示生成时没有连接任何资料，因此内容主要来自你的描述。你可以继续让我修改页面，或附一张图片让我放进指定页面。',
+        text: project.value.knowledge_base_ids.length || readySources.value.length
+          ? `我已经连接 ${project.value.knowledge_base_ids.length} 个知识库${readySources.value.length ? `和本次上传的 ${readySources.value.length} 份资料` : ''}。你可以直接告诉我修改哪一页，也可以附一张图片让我放进指定页面。`
+          : '这份演示生成时没有连接知识库，因此内容主要来自你的描述。你可以继续让我修改页面，或附一张图片让我放进指定页面。',
       })
     }
     schedule()
@@ -138,6 +138,7 @@ async function generatePpt() {
       projectId,
       prompt: requirements.value,
       sourceIds: selectedSourceIds.value,
+      knowledgeBaseIds: project.value?.knowledge_base_ids || [],
     })
     await router.push(generationPath)
   } catch (requestError) {

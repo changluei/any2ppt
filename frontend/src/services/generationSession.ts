@@ -8,6 +8,7 @@ export type GenerationSession = {
   prompt: string
   form?: ProjectInput
   sourceIds: string[]
+  knowledgeBaseIds: string[]
   uploadedSourceIds: string[]
   expectedFileCount: number
   idempotencyKey: string
@@ -26,6 +27,7 @@ function persist(session: GenerationSession) {
     prompt: session.prompt,
     form: session.form,
     sourceIds: session.sourceIds,
+    knowledgeBaseIds: session.knowledgeBaseIds,
     uploadedSourceIds: session.uploadedSourceIds,
     expectedFileCount: session.expectedFileCount,
     idempotencyKey: session.idempotencyKey,
@@ -36,7 +38,7 @@ function persist(session: GenerationSession) {
 
 export function beginGenerationSession(
   input: Pick<GenerationSession, 'mode' | 'prompt'> &
-    Partial<Pick<GenerationSession, 'projectId' | 'form' | 'sourceIds' | 'files'>>,
+    Partial<Pick<GenerationSession, 'projectId' | 'form' | 'sourceIds' | 'knowledgeBaseIds' | 'files'>>,
 ) {
   const files = [...(input.files || [])]
   activeSession = {
@@ -45,6 +47,7 @@ export function beginGenerationSession(
     prompt: input.prompt,
     form: input.form,
     sourceIds: [...(input.sourceIds || [])],
+    knowledgeBaseIds: [...(input.knowledgeBaseIds || input.form?.knowledge_base_ids || [])],
     uploadedSourceIds: [],
     expectedFileCount: files.length,
     idempotencyKey: `generation-${crypto.randomUUID()}`,
@@ -61,7 +64,7 @@ export function getGenerationSession(): GenerationSession | undefined {
   if (!raw) return undefined
   try {
     const stored = JSON.parse(raw) as StoredGenerationSession
-    activeSession = { ...stored, files: [] }
+    activeSession = { ...stored, knowledgeBaseIds: stored.knowledgeBaseIds || [], files: [] }
     return activeSession
   } catch {
     window.sessionStorage.removeItem(storageKey)

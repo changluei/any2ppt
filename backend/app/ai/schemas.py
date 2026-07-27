@@ -39,6 +39,7 @@ class LessonContext(BaseModel):
     lesson_count: int = Field(default=1, ge=1, le=8)
     student_profile: str = ""
     selected_source_ids: list[str] = Field(default_factory=list)
+    selected_knowledge_base_ids: list[str] = Field(default_factory=list)
     teacher_requirements: str = ""
     theme_id: str = "default"
     theme_name: str = ""

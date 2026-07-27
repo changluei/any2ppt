@@ -23,7 +23,7 @@
   },
   {
     "id": "seriph",
-    "name": "人文阅读",
+    "name": "Seriph · 人文阅读",
     "package": "@slidev/theme-seriph",
     "version": "0.25.0",
     "description": "带有书卷气和柔和排版，适合语文、阅读、历史与故事类课程。",

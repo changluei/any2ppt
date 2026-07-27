@@ -18,6 +18,7 @@ class ProjectCreate(BaseModel):
     student_profile: str = Field(default="", max_length=2000)
     teacher_requirements: str = Field(default="", max_length=3000)
     theme_id: str = Field(default="default", min_length=1, max_length=64)
+    knowledge_base_ids: list[str] = Field(default_factory=list, max_length=4)
 
 
 class ProjectOut(ProjectCreate, ORMModel):
@@ -38,7 +39,8 @@ class ThemeRecommendationRequest(BaseModel):
 
 class SourceOut(ORMModel):
     id: str
-    project_id: str
+    project_id: Optional[str]
+    knowledge_base_id: str
     original_name: str
     media_type: str
     size: int
@@ -64,6 +66,7 @@ class SearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=500)
     top_k: int = Field(default=5, ge=1, le=20)
     source_ids: Optional[list[str]] = None
+    knowledge_base_ids: list[str] = Field(default_factory=list, max_length=4)
 
 
 class SearchResult(BaseModel):
@@ -73,11 +76,29 @@ class SearchResult(BaseModel):
     filename: str
     location: str
     score: float
+    knowledge_base_id: Optional[str] = None
+
+
+class KnowledgeBaseOut(ORMModel):
+    id: str
+    name: str
+    kind: Literal["official", "personal"]
+    subject: str
+    description: str
+    status: str
+    read_only: bool
+    document_count: int
+    chunk_count: int
+    size_bytes: int
+    error_message: Optional[str]
+    created_at: datetime
+    updated_at: datetime
 
 
 class TaskCreate(BaseModel):
     type: str = Field(min_length=1, max_length=64)
     selected_source_ids: list[str] = Field(default_factory=list)
+    selected_knowledge_base_ids: list[str] = Field(default_factory=list, max_length=4)
     teacher_requirements: str = Field(default="", max_length=3000)
     idempotency_key: str = Field(min_length=3, max_length=100)
 

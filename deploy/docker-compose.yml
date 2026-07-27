@@ -29,7 +29,10 @@ services:
       SLIDEV_RENDERER_URL: http://renderer:3010
       AI_FORCE_FALLBACK: ${AI_FORCE_FALLBACK:-false}
     ports: ["8000:8000"]
-    volumes: ["app_data:/app/data"]
+    volumes:
+      - app_data:/app/data
+      - ../data/datasets:/app/datasets:ro
+      - ../data/transfer:/app/transfer
     depends_on:
       mysql: {condition: service_healthy}
       renderer: {condition: service_healthy}

@@ -129,6 +129,42 @@ class ProjectVectorStore:
         self._save(project_id, saved)
         return len(rows)
 
+    def upsert_records(self, namespace_id: str, records: Iterable[dict]) -> int:
+        """Bulk-upsert already chunked records into a durable knowledge-base namespace."""
+        rows = list(records)
+        if not rows:
+            return 0
+        documents = [str(row["content"]) for row in rows]
+        metadatas = []
+        for row in rows:
+            metadata = {
+                "project_id": namespace_id,
+                "source_id": str(row["source_id"]),
+                "chunk_id": str(row["chunk_id"]),
+                "filename": str(row.get("filename") or row["source_id"]),
+                "location": str(row.get("location") or ""),
+                "content_hash": str(row.get("content_hash") or ""),
+                "heading": str(row.get("heading") or ""),
+            }
+            metadatas.append(metadata)
+        client = self._get_client()
+        if client is not None:
+            try:
+                self._collection(namespace_id).upsert(
+                    ids=[str(row["chunk_id"]) for row in rows],
+                    documents=documents,
+                    metadatas=metadatas,
+                    embeddings=self.embedding_provider.embed_documents(documents),
+                )
+                return len(rows)
+            except Exception as exc:
+                raise RetrievalError("批量资料写入 Chroma 失败") from exc
+        saved = {str(row["chunk_id"]): row for row in self._load(namespace_id)}
+        for metadata, content in zip(metadatas, documents):
+            saved[metadata["chunk_id"]] = {**metadata, "content": content}
+        self._save(namespace_id, list(saved.values()))
+        return len(rows)
+
     @staticmethod
     def _where(source_ids: list[str] | None) -> dict | None:
         if not source_ids:

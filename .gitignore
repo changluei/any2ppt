@@ -18,6 +18,10 @@ backend/pytest-cache-files-*/
 htmlcov/
 data/*
 !data/.gitkeep
+!data/README.md
+!data/transfer/
+data/transfer/*
+!data/transfer/.gitkeep
 backend/data/*
 !backend/data/.gitkeep
 backend/uploads/

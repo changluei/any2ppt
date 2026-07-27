@@ -55,6 +55,14 @@ def test_health_and_project_crud(client):
     assert client.get("/health/db").json()["status"] == "ok"
     assert client.get("/health/ai").json()["status"] in {"ok", "degraded"}
     assert client.get("/health/chroma").status_code == 200
+    libraries = client.get("/api/knowledge-bases")
+    assert libraries.status_code == 200
+    assert [item["id"] for item in libraries.json()] == [
+        "official-chinese",
+        "official-mathematics",
+        "official-english",
+        "personal",
+    ]
     themes = client.get("/api/themes")
     assert themes.status_code == 200
     assert {item["id"] for item in themes.json()} == {
@@ -147,12 +155,15 @@ def test_force_delete_non_empty_project(client):
         files={"file": ("sample.md", b"# sample", "text/markdown")},
     )
     assert upload.status_code == 201
+    source_id = upload.json()["id"]
+    assert upload.json()["knowledge_base_id"] == "personal"
     blocked = client.delete(f"/api/projects/{project['id']}")
     assert blocked.status_code == 409
     assert blocked.json()["error"]["code"] == "PROJECT_NOT_EMPTY"
     deleted = client.delete(f"/api/projects/{project['id']}", params={"force": True})
     assert deleted.status_code == 204
     assert client.get(f"/api/projects/{project['id']}").status_code == 404
+    assert client.get(f"/api/knowledge-bases/personal/sources/{source_id}").status_code == 200
 
 
 def test_selected_tahta_theme_controls_slide_layouts(client):

@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -34,9 +34,10 @@ class Project(Base, TimestampMixin):
     teacher_requirements: Mapped[str] = mapped_column(Text, default="", nullable=False)
     theme_id: Mapped[str] = mapped_column(String(64), default="default", nullable=False)
     theme_status: Mapped[str] = mapped_column(String(24), default="selected", nullable=False)
+    knowledge_base_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     status: Mapped[str] = mapped_column(String(24), default="draft", index=True, nullable=False)
 
-    sources = relationship("SourceDocument", cascade="all, delete-orphan", passive_deletes=True)
+    sources = relationship("SourceDocument", passive_deletes=True)
     images = relationship("ProjectImage", cascade="all, delete-orphan", passive_deletes=True)
     tasks = relationship("AITask", cascade="all, delete-orphan", passive_deletes=True)
     artifacts = relationship("LessonArtifact", cascade="all, delete-orphan", passive_deletes=True)
@@ -44,16 +45,46 @@ class Project(Base, TimestampMixin):
     exports = relationship("ExportJob", cascade="all, delete-orphan", passive_deletes=True)
 
 
+class KnowledgeBase(Base, TimestampMixin):
+    __tablename__ = "knowledge_bases"
+    __table_args__ = (
+        Index("ix_knowledge_base_kind", "kind"),
+        Index("ix_knowledge_base_status", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    subject: Mapped[str] = mapped_column(String(40), default="", nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="empty", nullable=False)
+    read_only: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    document_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    sources = relationship("SourceDocument", back_populates="knowledge_base")
+
+
 class SourceDocument(Base, TimestampMixin):
     __tablename__ = "source_documents"
     __table_args__ = (
-        UniqueConstraint("project_id", "sha256", name="uq_project_source_hash"),
+        UniqueConstraint("knowledge_base_id", "sha256", name="uq_knowledge_base_source_hash"),
         Index("ix_source_project_status", "project_id", "status"),
         Index("ix_source_project_created", "project_id", "created_at"),
+        Index("ix_source_library_status", "knowledge_base_id", "status"),
+        Index("ix_source_library_created", "knowledge_base_id", "created_at"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
-    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[Optional[str]] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), index=True, nullable=True)
+    knowledge_base_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_bases.id", ondelete="RESTRICT"),
+        default="personal",
+        index=True,
+        nullable=False,
+    )
     original_name: Mapped[str] = mapped_column(String(255), nullable=False)
     stored_name: Mapped[str] = mapped_column(String(80), nullable=False)
     media_type: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -62,6 +93,7 @@ class SourceDocument(Base, TimestampMixin):
     storage_path: Mapped[str] = mapped_column(String(500), nullable=False)
     status: Mapped[str] = mapped_column(String(24), default="uploaded", index=True, nullable=False)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    knowledge_base = relationship("KnowledgeBase", back_populates="sources")
 
 
 class ProjectImage(Base, TimestampMixin):

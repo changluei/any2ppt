@@ -9,6 +9,7 @@ export type Project = {
   student_profile: string
   teacher_requirements: string
   theme_id: string
+  knowledge_base_ids: string[]
   theme_status: 'selected' | 'preparing' | 'ready' | 'failed'
   status: string
   created_at: string
@@ -19,7 +20,8 @@ export type ProjectInput = Omit<Project, 'id' | 'status' | 'theme_status' | 'cre
 export type SourceStatus = 'uploaded' | 'parsing' | 'indexing' | 'ready' | 'failed'
 export type Source = {
   id: string
-  project_id: string
+  project_id: string | null
+  knowledge_base_id: string
   original_name: string
   media_type: string
   size: number
@@ -35,6 +37,22 @@ export type SearchResult = {
   filename: string
   location: string
   score: number
+  knowledge_base_id?: string
+}
+export type KnowledgeBase = {
+  id: string
+  name: string
+  kind: 'official' | 'personal'
+  subject: string
+  description: string
+  status: 'empty' | 'importing' | 'ready' | 'failed'
+  read_only: boolean
+  document_count: number
+  chunk_count: number
+  size_bytes: number
+  error_message: string | null
+  created_at: string
+  updated_at: string
 }
 export type Citation = {
   source_id: string
@@ -114,6 +132,7 @@ export type Task = {
 export type TaskInput = {
   type: string
   selected_source_ids: string[]
+  selected_knowledge_base_ids: string[]
   teacher_requirements: string
   idempotency_key: string
 }
