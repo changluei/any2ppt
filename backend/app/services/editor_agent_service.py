@@ -242,9 +242,16 @@ class ProjectEditorToolbox(EditorToolbox):
                 citations=self.retrieved_citations,
             )
             self.executed_mutations.append("rewrite_slide")
+            changed_slide = next(
+                item
+                for item in self.latest_artifact["content"]["slides"]
+                if item.get("slide_id") == slide["slide_id"]
+            )
             return {
                 "changed": True,
                 "slide_id": slide["slide_id"],
+                "order": changed_slide.get("order"),
+                "title": changed_slide.get("title"),
                 "version_no": self.latest_artifact["version_no"],
                 "next": "调用 inspect_slide 和 validate_slide 检查新版本",
             }
@@ -274,6 +281,7 @@ class ProjectEditorToolbox(EditorToolbox):
             return {
                 "changed": True,
                 "slide_id": slide["slide_id"],
+                "order": slide.get("order"),
                 "position": position,
                 "version_no": self.latest_artifact["version_no"],
                 "vision_notice": "仅依据用户描述、文件名和尺寸放置，未分析图片像素。",
@@ -283,6 +291,18 @@ class ProjectEditorToolbox(EditorToolbox):
             placement_id = str(arguments.get("placement_id") or "").strip()
             if not placement_id:
                 raise ValueError("remove_image 缺少 placement_id")
+            placement_context = next(
+                (
+                    {
+                        "order": slide.get("order"),
+                        "image_name": placement.get("original_name"),
+                    }
+                    for slide in content.get("slides", [])
+                    for placement in slide.get("images", [])
+                    if placement.get("placement_id") == placement_id
+                ),
+                {},
+            )
             self.latest_artifact = remove_slide_image(
                 self.db,
                 self.artifact,
@@ -293,6 +313,7 @@ class ProjectEditorToolbox(EditorToolbox):
             return {
                 "changed": True,
                 "placement_id": placement_id,
+                **placement_context,
                 "version_no": self.latest_artifact["version_no"],
             }
 
@@ -414,7 +435,17 @@ def run_editor_chat(
         .all()
     )
     history = [
-        {"role": item.role, "content": item.content, "image_name": item.image_name}
+        {
+            "role": item.role,
+            "content": item.content,
+            "image_name": item.image_name,
+            "actions": [
+                trace.get("action")
+                for trace in (item.tool_trace or [])
+                if trace.get("ok") and trace.get("action")
+            ],
+            "artifact_version_no": item.artifact_version_no,
+        }
         for item in reversed(previous_rows)
     ]
     user_row = EditorAgentMessage(

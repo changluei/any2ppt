@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
@@ -72,8 +73,12 @@ SYSTEM_PROMPT = """
 - 修改前先查看目标页面；不清楚目标页时先 inspect_deck。
 - 用户说“当前页”时使用请求中的 current_slide_id。
 - 可以连续操作，但一次请求最多修改三次。
-- 多轮对话历史只用于理解省略和指代，事实仍需通过工具观察。
+- 当前 user_message 是本轮唯一需要执行的命令；不得因为历史里出现过修改要求而重复执行旧任务。
+- 多轮对话历史只用于理解省略、指代和回答“刚才是否完成”等状态问题，事实仍需通过工具观察。
+- 最终 response 必须直接回答当前 user_message，并点明本轮实际修改的页码和内容；
+  禁止复制历史回复、重复能力介绍或只说“已完成”。
 - 若用户只是问候或询问能力，可以直接 finish，不修改课件。
+- 若用户询问“解决了吗、改好了吗、刚才做了什么”，根据历史和本轮 observation 回答，禁止再次修改。
 - 页面 Markdown 必须保持 Slidev 可渲染，且布局插槽应符合模板能力。
 """.strip()
 
@@ -81,6 +86,97 @@ SYSTEM_PROMPT = """
 def _compact(value: Any, limit: int = 12000) -> str:
     text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     return text if len(text) <= limit else f"{text[:limit]}…"
+
+
+def specific_agent_response(
+    user_message: str,
+    observations: list[dict[str, Any]],
+    model_response: str,
+) -> str:
+    """Make mutation replies evidence-based instead of trusting a generic model sentence."""
+    successful = [
+        item
+        for item in observations
+        if item.get("ok") and item.get("action") in MUTATING_ACTIONS
+    ]
+    if not successful:
+        return model_response.strip()
+
+    changes: list[str] = []
+    for event in successful:
+        action = event["action"]
+        observation = event.get("observation", {})
+        order = observation.get("order")
+        page = f"第 {order} 页" if order else "目标页面"
+        title = str(observation.get("title") or "").strip()
+        page_with_title = f"{page}“{title}”" if title else page
+        if action == "rewrite_slide":
+            changes.append(f"{page_with_title}已按你的要求完成修改")
+        elif action == "place_image":
+            position = {
+                "left": "左侧",
+                "right": "右侧",
+                "center": "中间",
+                "wide": "下方宽图区域",
+                "background": "背景层",
+            }.get(observation.get("position"), "指定位置")
+            changes.append(f"附件图片已放到{page}的{position}")
+        elif action == "remove_image":
+            image_name = str(observation.get("image_name") or "").strip()
+            changes.append(f"{page}中的图片{f'“{image_name}”' if image_name else ''}已移除")
+
+    validation = next(
+        (
+            item.get("observation", {})
+            for item in reversed(observations)
+            if item.get("ok") and item.get("action") == "validate_slide"
+        ),
+        None,
+    )
+    if validation and validation.get("valid"):
+        check = "，并已检查通过"
+    elif validation and validation.get("issues"):
+        check = f"。已保存新版本，但检查仍提示：{'；'.join(validation['issues'][:3])}"
+    else:
+        check = "，并已保存为新版本"
+
+    request = " ".join(user_message.split())
+    request_hint = f"（你的要求：{request[:60]}{'…' if len(request) > 60 else ''}）" if request else ""
+    return f"已解决：{'；'.join(changes)}{check}。{request_hint}".strip()
+
+
+def status_agent_response(
+    user_message: str,
+    history: list[dict[str, Any]],
+    model_response: str,
+) -> str:
+    if not re.search(r"解决了吗|改好了吗|完成了吗|弄好了吗|刚才做了什么|刚才改了什么", user_message):
+        return model_response
+    previous = next(
+        (
+            item
+            for item in reversed(history)
+            if item.get("role") == "assistant" and item.get("actions")
+        ),
+        None,
+    )
+    if not previous:
+        return model_response
+    labels = {
+        "rewrite_slide": "页面内容修改",
+        "place_image": "图片放置",
+        "remove_image": "图片移除",
+    }
+    completed = [
+        labels[action]
+        for action in previous.get("actions", [])
+        if action in labels
+    ]
+    if not completed:
+        return model_response
+    version = previous.get("artifact_version_no")
+    version_text = f"，已保存为版本 {version}" if version else "，已保存为新版本"
+    return f"已解决：上一轮已完成{'、'.join(dict.fromkeys(completed))}{version_text}。"
 
 
 def run_editor_react_agent(
@@ -129,6 +225,12 @@ def run_editor_react_agent(
             response = decision.response.strip()
             if not response:
                 response = "已完成本次检查。" if actions else "请告诉我希望修改哪一页以及具体要求。"
+            response = specific_agent_response(user_message, observations, response)
+            if not any(
+                item.get("ok") and item.get("action") in MUTATING_ACTIONS
+                for item in observations
+            ):
+                response = status_agent_response(user_message, history, response)
             return EditorAgentResult(response, run_trace, actions, observations, model_name)
 
         signature = f"{action}:{_compact(decision.arguments, 3000)}"
@@ -168,9 +270,10 @@ def run_editor_react_agent(
         for item in observations
         if item.get("ok") and item.get("action") in MUTATING_ACTIONS
     ]
-    response = (
+    fallback_response = (
         "我已完成可安全执行的修改并保存为新版本；由于达到单轮步骤上限，请先查看当前结果，再继续告诉我下一步。"
         if successful_mutations
         else "我检查了当前课件，但在安全步骤上限内没有完成修改。请把目标页和修改要求说得更具体一些。"
     )
+    response = specific_agent_response(user_message, observations, fallback_response)
     return EditorAgentResult(response, run_trace, actions, observations, model_name)

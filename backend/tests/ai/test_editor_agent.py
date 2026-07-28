@@ -1,4 +1,4 @@
-from app.ai.editor_agent import SYSTEM_PROMPT, run_editor_react_agent
+from app.ai.editor_agent import SYSTEM_PROMPT, run_editor_react_agent, status_agent_response
 from app.ai.llm_client import LLMResult
 
 
@@ -25,7 +25,12 @@ class RecordingTools:
         if action == "inspect_slide":
             return {"slide": {"slide_id": "SLIDE-03", "markdown": "# 原标题"}}
         if action == "rewrite_slide":
-            return {"changed": True, "version_no": 2}
+            return {
+                "changed": True,
+                "version_no": 2,
+                "order": 3,
+                "title": "新标题",
+            }
         if action == "validate_slide":
             return {"valid": True, "issues": []}
         raise AssertionError(action)
@@ -59,7 +64,7 @@ def test_editor_agent_runs_action_observation_loop_without_exposing_reasoning():
         trace_id="trace-1",
     )
 
-    assert result.response == "第 3 页已精简并检查通过。"
+    assert result.response == "已解决：第 3 页“新标题”已按你的要求完成修改，并已检查通过。（你的要求：精简第 3 页）"
     assert result.actions == ["inspect_slide", "rewrite_slide", "validate_slide"]
     assert [call[0] for call in tools.calls] == result.actions
     assert all("thought" not in event for event in result.observations)
@@ -96,3 +101,19 @@ def test_editor_agent_tells_model_that_attachment_has_no_vision():
 
     assert "不能看见图片像素" in captured["system"]
     assert '"vision_available":false' in captured["user"]
+
+
+def test_status_reply_uses_previous_actual_actions_instead_of_repeating_capabilities():
+    response = status_agent_response(
+        "刚才改好了吗？",
+        [
+            {
+                "role": "assistant",
+                "content": "旧的通用能力介绍",
+                "actions": ["inspect_slide", "rewrite_slide", "validate_slide"],
+                "artifact_version_no": 8,
+            }
+        ],
+        "我可以查看课件、修改页面……",
+    )
+    assert response == "已解决：上一轮已完成页面内容修改，已保存为版本 8。"
