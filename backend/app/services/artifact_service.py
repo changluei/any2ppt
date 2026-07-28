@@ -476,6 +476,119 @@ def update_slide_markdown(
     return artifact_out(artifact, artifact.versions[-1])
 
 
+def rewrite_slide_from_agent(
+    db: Session,
+    artifact: LessonArtifact,
+    base_version_no: int,
+    slide_id: str,
+    markdown: str,
+    *,
+    title: str = "",
+    layout: str = "",
+    citations: list[dict] | None = None,
+) -> dict:
+    """Apply one bounded ReAct action while preserving immutable versions and stable IDs."""
+    if artifact.type != "slide_deck":
+        raise ValueError("只有课件支持 Agent 页面重写")
+    if artifact.current_version_no != base_version_no:
+        raise RuntimeError(f"VERSION_CONFLICT:{artifact.current_version_no}")
+
+    normalized = markdown.strip()
+    if not normalized:
+        raise ValueError("页面 Markdown 不能为空")
+    if len(normalized) > 20000:
+        raise ValueError("页面 Markdown 超过 20000 字符限制")
+
+    current = artifact.versions[-1]
+    content = deepcopy(current.content)
+    target = next(
+        (item for item in content.get("slides", []) if item.get("slide_id") == slide_id),
+        None,
+    )
+    if not target:
+        raise ValueError("未找到需要重写的课件页")
+
+    allowed_layouts = content.get("theme_layouts", []) or ["default"]
+    selected_layout = layout.strip() or target.get("layout", "default")
+    if selected_layout not in allowed_layouts:
+        raise ValueError(f"模板不存在布局 {selected_layout}")
+
+    heading = next(
+        (
+            line.removeprefix("# ").strip()
+            for line in normalized.splitlines()
+            if line.startswith("# ") and line.removeprefix("# ").strip()
+        ),
+        "",
+    )
+    target["markdown"] = normalized
+    target["layout"] = selected_layout
+    target["title"] = (title.strip() or heading or target.get("title", ""))[:160]
+
+    if target == next(
+        item for item in current.content.get("slides", []) if item.get("slide_id") == slide_id
+    ):
+        return artifact_out(artifact, current)
+
+    merged_citations: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for citation in list(current.citations) + list(citations or []):
+        key = (str(citation.get("source_id", "")), str(citation.get("chunk_id", "")))
+        if key in seen:
+            continue
+        seen.add(key)
+        merged_citations.append(citation)
+
+    save_version(
+        db,
+        artifact.project_id,
+        artifact.type,
+        content,
+        merged_citations,
+        current.warnings,
+        "agent_revision",
+        [slide_id],
+    )
+    notes = (
+        db.query(LessonArtifact)
+        .filter_by(project_id=artifact.project_id, type="speaker_notes")
+        .with_for_update()
+        .first()
+    )
+    if notes and notes.versions:
+        note_current = notes.versions[-1]
+        note_instruction = (
+            "同步 ReAct Agent 对课件页的修改。"
+            f"新页面标题：{target['title']}；新页面内容：{normalized[:3000]}"
+        )
+        try:
+            note_content, note_ids = revise_block(
+                note_current.content,
+                "note",
+                slide_id,
+                note_instruction,
+                citations=list(note_current.citations) + list(citations or []),
+            )
+        except ValueError:
+            # A legacy deck may have no matching note. The bounded slide edit itself
+            # remains valid and must not leave the session in a failed transaction.
+            pass
+        else:
+            save_version(
+                db,
+                artifact.project_id,
+                notes.type,
+                note_content,
+                list(note_current.citations) + list(citations or []),
+                note_current.warnings,
+                "agent_synced_revision",
+                note_ids,
+            )
+    db.commit()
+    db.refresh(artifact)
+    return artifact_out(artifact, artifact.versions[-1])
+
+
 IMAGE_PLACEMENT_PRESETS = {
     "left": {"x": 4, "y": 18, "width": 40, "height": 66, "opacity": 1},
     "right": {"x": 56, "y": 18, "width": 40, "height": 66, "opacity": 1},

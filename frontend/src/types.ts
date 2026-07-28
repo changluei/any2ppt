@@ -90,6 +90,23 @@ export type ProjectImage = {
   content_url: string
   created_at: string
 }
+export type EditorAgentMessage = {
+  id: string
+  project_id: string
+  role: 'user' | 'assistant'
+  content: string
+  image_id?: string
+  image_name?: string
+  artifact_version_no?: number
+  created_at: string
+}
+export type EditorAgentChatResult = {
+  message: EditorAgentMessage
+  artifact?: Artifact
+  actions: string[]
+  trace_id: string
+  degraded: boolean
+}
 export type SlideImagePlacement = {
   placement_id: string
   image_id: string

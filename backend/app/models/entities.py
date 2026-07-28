@@ -43,6 +43,7 @@ class Project(Base, TimestampMixin):
     artifacts = relationship("LessonArtifact", cascade="all, delete-orphan", passive_deletes=True)
     graphs = relationship("GraphRun", cascade="all, delete-orphan", passive_deletes=True)
     exports = relationship("ExportJob", cascade="all, delete-orphan", passive_deletes=True)
+    agent_messages = relationship("EditorAgentMessage", cascade="all, delete-orphan", passive_deletes=True)
 
 
 class KnowledgeBase(Base, TimestampMixin):
@@ -113,6 +114,32 @@ class ProjectImage(Base, TimestampMixin):
     storage_path: Mapped[str] = mapped_column(String(500), nullable=False)
     width: Mapped[int] = mapped_column(Integer, nullable=False)
     height: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class EditorAgentMessage(Base):
+    __tablename__ = "editor_agent_messages"
+    __table_args__ = (
+        Index("ix_editor_agent_project_created", "project_id", "created_at"),
+        Index("ix_editor_agent_trace", "trace_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    image_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("project_images.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    image_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    trace_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    tool_trace: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    artifact_version_no: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class AITask(Base, TimestampMixin):

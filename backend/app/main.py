@@ -10,7 +10,7 @@ from sqlalchemy import text
 from app.ai.skills import registry
 from app.ai.schemas import LessonContext
 from app.ai.vector_store import ProjectVectorStore
-from app.api.routes import artifacts, images, knowledge_bases, projects, sources, tasks, workflow
+from app.api.routes import artifacts, editor_agent, images, knowledge_bases, projects, sources, tasks, workflow
 from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.services.recovery_service import recover_interrupted_work
@@ -173,6 +173,7 @@ app.include_router(projects.router)
 app.include_router(sources.router)
 app.include_router(knowledge_bases.router)
 app.include_router(images.router)
+app.include_router(editor_agent.router)
 app.include_router(tasks.router)
 app.include_router(artifacts.router)
 app.include_router(workflow.router)

@@ -1,5 +1,5 @@
 import { http, listData, objectData } from './http'
-import type { Artifact, ExportJob, GraphState, Project, ProjectInput, Skill, Task, TaskInput, ThemeDescriptor } from '../types'
+import type { Artifact, EditorAgentChatResult, EditorAgentMessage, ExportJob, GraphState, Project, ProjectInput, Skill, Task, TaskInput, ThemeDescriptor } from '../types'
 export type { ProjectInput } from '../types'
 export const api = {
   health: () => http.get('/health').then(r=>objectData<Record<string, unknown>>(r.data)),
@@ -22,6 +22,15 @@ export const api = {
   saveSlideMarkdown: (id:string,data:{base_version_no:number;slide_id:string;markdown:string}) => http.post(`/api/artifacts/${id}/markdown`,data).then(r=>objectData<Artifact>(r.data)),
   placeSlideImage: (id:string,data:{base_version_no:number;slide_id:string;image_id:string;position:string;caption:string}) => http.post(`/api/artifacts/${id}/images`,data).then(r=>objectData<Artifact>(r.data)),
   removeSlideImage: (id:string,placementId:string,baseVersionNo:number) => http.delete(`/api/artifacts/${id}/images/${placementId}`,{params:{base_version_no:baseVersionNo}}).then(r=>objectData<Artifact>(r.data)),
+  agentMessages: (projectId:string) => http.get(`/api/projects/${projectId}/agent/messages`).then(r=>listData<EditorAgentMessage>(r.data)),
+  agentChat: (
+    projectId:string,
+    data:{message:string;current_slide_id:string;base_version_no:number;image_id?:string},
+  ) => http.post(
+    `/api/projects/${projectId}/agent/chat`,
+    data,
+    {timeout:180000},
+  ).then(r=>objectData<EditorAgentChatResult>(r.data)),
   versions: (id:string) => http.get(`/api/artifacts/${id}/versions`).then(r=>listData<Artifact>(r.data)),
   previewUrl: (artifactId:string,slideId:string,versionNo:number) =>
     new URL(

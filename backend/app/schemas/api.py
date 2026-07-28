@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ORMModel(BaseModel):
@@ -157,6 +157,38 @@ class SlideImagePlacementCreate(BaseModel):
     image_id: str = Field(min_length=1, max_length=36)
     position: Literal["left", "right", "center", "wide", "background"] = "right"
     caption: str = Field(default="", max_length=300)
+
+
+class EditorAgentChatRequest(BaseModel):
+    message: str = Field(default="", max_length=1200)
+    current_slide_id: str = Field(min_length=1, max_length=100)
+    base_version_no: int = Field(ge=1)
+    image_id: Optional[str] = Field(default=None, max_length=36)
+
+    @model_validator(mode="after")
+    def require_content(self):
+        if not self.message.strip() and not self.image_id:
+            raise ValueError("消息和图片不能同时为空")
+        return self
+
+
+class EditorAgentMessageOut(ORMModel):
+    id: str
+    project_id: str
+    role: Literal["user", "assistant"]
+    content: str
+    image_id: Optional[str]
+    image_name: Optional[str]
+    artifact_version_no: Optional[int]
+    created_at: datetime
+
+
+class EditorAgentChatOut(BaseModel):
+    message: EditorAgentMessageOut
+    artifact: Optional[ArtifactOut]
+    actions: list[str]
+    trace_id: str
+    degraded: bool = False
 
 
 class HumanDecision(BaseModel):

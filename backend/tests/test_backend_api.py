@@ -498,3 +498,72 @@ def test_version_metadata_rollback_and_student_privacy(client):
     assert removed.json()["version_no"] == 6
     removed_slide = next(item for item in removed.json()["content"]["slides"] if item["slide_id"] == target)
     assert removed_slide["images"] == []
+
+
+def test_editor_react_agent_persists_conversation_and_versions(client):
+    project = create_project(client)
+    task_response = client.post(
+        f"/api/projects/{project['id']}/tasks",
+        json={
+            "type": "full_lesson",
+            "selected_source_ids": [],
+            "teacher_requirements": "",
+            "idempotency_key": "editor-agent-flow",
+        },
+    )
+    task = wait_for_task(client, task_response.json()["id"])
+    assert task["status"] == "succeeded"
+    artifacts = client.get(f"/api/projects/{project['id']}/artifacts").json()
+    deck = next(item for item in artifacts if item["type"] == "slide_deck")
+    target = deck["content"]["slides"][0]
+
+    revision = client.post(
+        f"/api/projects/{project['id']}/agent/chat",
+        json={
+            "message": "精简当前页的文字",
+            "current_slide_id": target["slide_id"],
+            "base_version_no": deck["version_no"],
+        },
+    )
+    assert revision.status_code == 200, revision.text
+    result = revision.json()
+    assert result["degraded"] is True
+    assert result["actions"] == ["rewrite_slide"]
+    assert result["artifact"]["version_no"] == deck["version_no"] + 1
+    assert result["artifact"]["change_type"] == "local_revision"
+
+    image_buffer = io.BytesIO()
+    Image.new("RGB", (640, 360), color=(20, 160, 110)).save(image_buffer, format="PNG")
+    uploaded = client.post(
+        f"/api/projects/{project['id']}/images",
+        files={"file": ("板书参考.png", image_buffer.getvalue(), "image/png")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    with_image = client.post(
+        f"/api/projects/{project['id']}/agent/chat",
+        json={
+            "message": "把附件放到当前页左侧，不要修改文字",
+            "current_slide_id": target["slide_id"],
+            "base_version_no": result["artifact"]["version_no"],
+            "image_id": uploaded.json()["id"],
+        },
+    )
+    assert with_image.status_code == 200, with_image.text
+    image_result = with_image.json()
+    assert image_result["actions"] == ["place_image"]
+    changed_slide = next(
+        item
+        for item in image_result["artifact"]["content"]["slides"]
+        if item["slide_id"] == target["slide_id"]
+    )
+    assert changed_slide["images"][0]["position"] == "left"
+
+    messages = client.get(f"/api/projects/{project['id']}/agent/messages")
+    assert messages.status_code == 200
+    assert [item["role"] for item in messages.json()] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]
+    assert messages.json()[2]["image_name"] == "板书参考.png"

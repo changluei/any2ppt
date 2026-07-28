@@ -9,6 +9,9 @@
 - `generate_lesson_bundle(LessonContext(...), trace_id=...)`：生成教案、课件、逐页讲稿和分层练习。
 - `revise_block(...)`：只修改指定页面、讲稿或练习。
 - `build_langgraph()`、`review_artifacts(...)`：七节点条件返修和确定性质量检查。
+- `run_editor_react_agent(...)`：编辑页的有界 ReAct 工具循环；支持查看课件与模板、
+  RAG 检索、单页重写、图片放置/移除和确定性页面检查。图片只提供文件元数据，
+  DeepSeek 文本模型不会接收或理解图片像素。
 - `app.services.graph_service`：生产执行器；将每个节点的开始/完成事件、完整状态和
   返修次数写入 `GraphRun`，在 `human_confirm` 暂停，并从数据库 checkpoint
   执行接受、取消或定向返修。

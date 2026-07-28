@@ -6,7 +6,7 @@ import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { sourcesApi } from '../api/sources'
 import { imagesApi } from '../api/images'
-import type { ApiError, Artifact, ExportJob, GraphState, Project, Source, Task, ThemeDescriptor } from '../types'
+import type { ApiError, Artifact, EditorAgentMessage, ExportJob, GraphState, Project, Source, Task, ThemeDescriptor } from '../types'
 import AppError from '../components/AppError.vue'
 import AppLoading from '../components/AppLoading.vue'
 import SlidevPreview from '../components/SlidevPreview.vue'
@@ -86,13 +86,21 @@ async function load() {
   loading.value = true
   error.value = undefined
   try {
-    ;[project.value, sources.value, tasks.value, artifacts.value, themes.value] = await Promise.all([
+    const loaded = await Promise.all([
       api.project(projectId),
       sourcesApi.list(projectId),
       api.tasks(projectId),
       api.artifacts(projectId),
       api.themes(),
+      api.agentMessages(projectId),
     ])
+    ;[project.value, sources.value, tasks.value, artifacts.value, themes.value] = loaded
+    chatMessages.value = (loaded[5] as EditorAgentMessage[]).map((item) => ({
+      id: item.id,
+      role: item.role,
+      text: item.content,
+      imageName: item.image_name,
+    }))
     requirements.value = project.value.teacher_requirements
     selectedSourceIds.value = readySources.value.map((item) => item.id)
     await loadVersions()
@@ -102,8 +110,8 @@ async function load() {
         id: crypto.randomUUID(),
         role: 'assistant',
         text: project.value.knowledge_base_ids.length || readySources.value.length
-          ? `我已经连接 ${project.value.knowledge_base_ids.length} 个知识库${readySources.value.length ? `和本次上传的 ${readySources.value.length} 份资料` : ''}。你可以直接告诉我修改哪一页，也可以附一张图片让我放进指定页面。`
-          : '这份演示生成时没有连接知识库，因此内容主要来自你的描述。你可以继续让我修改页面，或附一张图片让我放进指定页面。',
+          ? `我是课件编辑 ReAct Agent，已连接 ${project.value.knowledge_base_ids.length} 个知识库${readySources.value.length ? `和本次上传的 ${readySources.value.length} 份资料` : ''}。我会先查看页面，需要事实依据时再检索资料，然后修改并检查结果。`
+          : '我是课件编辑 ReAct Agent。我会先查看课件，再按你的要求修改并检查结果；当前没有连接知识库，涉及事实内容时我会明确提醒。',
       })
     }
     schedule()
@@ -295,29 +303,6 @@ function pickChatImage(event: Event) {
   chatImagePreview.value = URL.createObjectURL(file)
 }
 
-function targetSlideFor(message: string) {
-  const order = Number(/第\s*(\d+)\s*(?:页|张)/.exec(message)?.[1] || 0)
-  return slides.value.find((item) => item.order === order) || selectedSlide.value
-}
-
-function imagePositionFor(message: string) {
-  if (/背景|铺满/.test(message)) return 'background'
-  if (/左侧|左边/.test(message)) return 'left'
-  if (/居中|中央|中间/.test(message)) return 'center'
-  if (/宽图|横幅|底部|下方/.test(message)) return 'wide'
-  return 'right'
-}
-
-function isGreeting(message: string) {
-  return /^(你好|您好|在吗|谢谢|谢谢你|你能做什么)[？?！!。,\s]*$/.test(message)
-}
-
-function isImageOnlyInstruction(message: string, hasImage: boolean) {
-  return hasImage
-    && /(添加|放到|放在|放进|放入|插入|使用|这张|图片)/.test(message)
-    && !/(精简|扩写|重写|改写|调整文字|修改标题|补充内容|改成)/.test(message)
-}
-
 async function scrollChat() {
   await nextTick()
   chatThread.value?.scrollTo({ top: chatThread.value.scrollHeight, behavior: 'smooth' })
@@ -333,57 +318,39 @@ async function sendChat() {
     || markdownSaving.value
     || !latestDeck.value
   ) return
-  const target = targetSlideFor(message)
+  const target = selectedSlide.value
   if (!target) return
 
   chatMessages.value.push({
     id: crypto.randomUUID(),
     role: 'user',
-    text: message || `把这张图片添加到第 ${target.order} 页`,
+    text: message || `把这张图片合理放到当前第 ${target.order} 页`,
     imageName: imageFile?.name,
   })
   chatInput.value = ''
-  clearChatImage()
   await scrollChat()
 
   busy.value = 'chat'
-  let working = latestDeck.value
-  const completed: string[] = []
   try {
+    let uploadedImageId: string | undefined
     if (imageFile) {
       const uploaded = await imagesApi.upload(projectId, imageFile, (value) => (chatUploadProgress.value = value))
-      const changed = await api.placeSlideImage(working.artifact_id, {
-        base_version_no: working.version_no,
-        slide_id: target.slide_id,
-        image_id: uploaded.id,
-        position: imagePositionFor(message),
-        caption: '',
-      })
-      updateArtifact(changed)
-      working = changed
-      completed.push(`图片已经添加到第 ${target.order} 页`)
+      uploadedImageId = uploaded.id
     }
-
-    if (message && !isGreeting(message) && !isImageOnlyInstruction(message, Boolean(imageFile))) {
-      const changed = await api.revise(working.artifact_id, {
-        base_version_no: working.version_no,
-        target_type: 'slide',
-        target_id: target.slide_id,
-        instruction: message,
-        sync_related: true,
-      })
-      updateArtifact(changed)
-      working = changed
-      completed.push(`第 ${target.order} 页已按要求更新`)
+    const result = await api.agentChat(projectId, {
+      message,
+      base_version_no: latestDeck.value.version_no,
+      current_slide_id: target.slide_id,
+      image_id: uploadedImageId,
+    })
+    if (result.artifact) {
+      updateArtifact(result.artifact)
+      await loadVersions()
     }
-
-    await loadVersions()
     chatMessages.value.push({
-      id: crypto.randomUUID(),
+      id: result.message.id,
       role: 'assistant',
-      text: completed.length
-        ? `${completed.join('，')}。修改已保存为新版本。`
-        : '你好！你可以让我修改当前页，也可以说“把这张图放到第 3 页右侧”并附上图片。',
+      text: result.message.content,
     })
   } catch (requestError) {
     chatMessages.value.push({
@@ -392,6 +359,7 @@ async function sendChat() {
       text: `这次没有完成：${(requestError as Error).message}。你可以换一种更具体的说法再试一次。`,
     })
   } finally {
+    clearChatImage()
     busy.value = ''
     chatUploadProgress.value = 0
     await scrollChat()
@@ -589,7 +557,7 @@ onUnmounted(() => {
       <aside class="ai-sidebar">
         <div class="assistant-head">
           <span>✦</span>
-          <div><b>AI 助手</b><small>对话修改课件 · 支持附图</small></div>
+          <div><b>AI 助手</b><small>ReAct 编辑 Agent · 支持附图</small></div>
         </div>
 
         <div ref="chatThread" class="assistant-chat">
@@ -619,7 +587,7 @@ onUnmounted(() => {
             v-model="chatInput"
             :disabled="!selectedSlide || !!busy || markdownDirty || markdownSaving"
             maxlength="1000"
-            placeholder="例如：精简当前页；或附图后输入“放到第 3 页右侧”…"
+            placeholder="例如：结合数学知识库改好第 3 页；或附图后说明希望放在哪一页…"
             @keydown.meta.enter.prevent="sendChat"
             @keydown.ctrl.enter.prevent="sendChat"
           />
