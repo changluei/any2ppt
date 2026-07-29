@@ -1,4 +1,5 @@
 <script setup lang="ts">
+/** 可重试的统一错误态；业务页负责提供真正的 reload 回调。 */
 defineProps<{ error: string }>()
 defineEmits<{ retry: [] }>()
 </script>

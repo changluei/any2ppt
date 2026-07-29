@@ -1,3 +1,9 @@
+"""离线评测检索、路由与最终生成包的轻量指标。
+
+这些函数不参与在线生成，只供 tests/ai 和 benchmark 脚本做回归门禁；返回
+普通 dict 便于落盘、比较或在 CI 中展示。
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -10,6 +16,7 @@ from .vector_store import ProjectVectorStore
 
 @dataclass(frozen=True)
 class GoldenQuery:
+    """一条带期望资料/关键词的检索金标。"""
     project_id: str
     query: str
     expected_source_id: str | None
@@ -23,6 +30,7 @@ def evaluate_retrieval(
     top_k: int = 3,
     min_score: float = 0.0,
 ) -> dict[str, Any]:
+    """计算命中率、MRR 等检索指标。"""
     cases = list(queries)
     hits = 0
     empty = 0
@@ -52,6 +60,7 @@ def evaluate_retrieval(
 
 
 def evaluate_router(cases: Iterable[tuple[str, str | None]]) -> dict[str, Any]:
+    """验证自然语言请求能否路由到期望修订目标。"""
     rows = []
     correct = 0
     for text, expected in cases:
@@ -68,6 +77,7 @@ def evaluate_router(cases: Iterable[tuple[str, str | None]]) -> dict[str, Any]:
 
 
 def evaluate_bundle(artifacts: dict[str, dict]) -> dict[str, Any]:
+    """统计生成包完整性、引用覆盖与基本结构质量。"""
     issues = review_artifacts(artifacts)
     citations = artifacts.get("lesson_plan", {}).get("citations", [])
     invalid_citations = [

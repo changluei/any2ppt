@@ -1,4 +1,8 @@
 <script setup lang="ts">
+/**
+ * 首页/演示列表共用的主题卡片视觉。
+ * 优先显示静态预览图；缺图时按 palette 生成占位，不触发主题下载。
+ */
 import type { ThemeDescriptor } from '../types'
 
 defineProps<{

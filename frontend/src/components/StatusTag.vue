@@ -1,4 +1,5 @@
 <script setup lang="ts">
+/** 把后端状态码统一映射成 Element Plus 标签颜色与中文文案。 */
 import {computed} from 'vue'
 import{statusText}from'../utils/files'
 const p=defineProps<{status:string}>()

@@ -1,4 +1,10 @@
 <script setup lang="ts">
+/**
+ * 强制锁定的生成编排页。
+ *
+ * 依次创建/更新项目、上传可选资料、等待索引、创建幂等任务并轮询完成。
+ * active session 期间路由守卫和 beforeunload 会阻止用户离开。
+ */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ArrowLeft, RefreshRight } from '@element-plus/icons-vue'
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
@@ -46,6 +52,7 @@ function sleep(milliseconds: number) {
 }
 
 async function uploadSources(current: GenerationSession, projectId: string) {
+  // 逐文件上传便于恢复已完成项；刷新导致 File 丢失时会给出明确提示。
   let uploadedIds = [...current.uploadedSourceIds]
 
   if (uploadedIds.length < current.expectedFileCount && current.files.length) {
@@ -81,6 +88,7 @@ async function uploadSources(current: GenerationSession, projectId: string) {
 }
 
 async function pollTask(taskId: string) {
+  // 后端任务是进度事实来源，本地动画只填充节点之间的视觉停顿。
   phase.value = 1
   while (!stopped) {
     const currentTask = await api.task(taskId)
@@ -104,6 +112,7 @@ async function pollTask(taskId: string) {
 }
 
 async function runGeneration() {
+  // 创建链路的唯一编排入口；任一步失败都会保持锁定并进入 retry 状态。
   failure.value = ''
   locked.value = true
   const current = getGenerationSession()
@@ -170,6 +179,7 @@ async function runGeneration() {
 }
 
 async function retry() {
+  // 沿用 session 中已上传 ID 和幂等键，避免重复项目与重复任务。
   if (!project.value || !task.value) return returnToEdit()
   const restored = beginGenerationSession({
     mode: 'regenerate',
@@ -201,6 +211,7 @@ async function returnToEdit() {
 }
 
 function handleBeforeUnload(event: BeforeUnloadEvent) {
+  // 浏览器只允许原生离开提示，无法可靠自定义文字。
   if (!locked.value) return
   event.preventDefault()
   event.returnValue = ''

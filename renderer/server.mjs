@@ -1,3 +1,11 @@
+/**
+ * Any2PPT 的隔离 Slidev 渲染服务。
+ *
+ * 后端只准备 job 目录和业务数据，本进程负责白名单主题安装/缓存、主题布局
+ * 能力扫描、PPTX 导出与 PNG 预览。所有外部 ID 和路径都经过校验，避免通过
+ * 渲染接口读取或覆盖 renderRoot/themeRoot 之外的文件。
+ */
+
 import { execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
@@ -40,11 +48,13 @@ const allowedThemes = new Set([
 ])
 
 function json(response, status, payload) {
+  // 所有 endpoint 使用同一 JSON 响应格式，调用方无需猜 content-type。
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
   response.end(JSON.stringify(payload))
 }
 
 async function readJson(request) {
+  // 限制控制请求体；课件正文通过共享 job 目录传递，不走这个 HTTP body。
   let body = ''
   for await (const chunk of request) {
     body += chunk
@@ -54,12 +64,14 @@ async function readJson(request) {
 }
 
 function validatedTheme(payload) {
+  // 只允许目录中审查过的固定版本，防止任意 npm 包安装与供应链执行。
   const themeSpec = `${payload.theme_package}@${payload.theme_version}`
   if (!allowedThemes.has(themeSpec)) throw new Error('THEME_NOT_ALLOWED')
   return themeSpec
 }
 
 function projectThemeDir(projectId) {
+  // UUID 校验与 resolve 前缀检查共同阻止目录穿越。
   if (!/^[0-9a-f-]{36}$/i.test(projectId || '')) throw new Error('INVALID_PROJECT_ID')
   const target = path.resolve(themeRoot, projectId)
   if (!target.startsWith(`${themeRoot}${path.sep}`)) throw new Error('INVALID_THEME_PATH')
@@ -67,6 +79,7 @@ function projectThemeDir(projectId) {
 }
 
 function packageCacheKey(themeSpec) {
+  // 包名可能含 @ 和 /，哈希后才能稳定作为缓存目录。
   return createHash('sha256').update(themeSpec).digest('hex').slice(0, 24)
 }
 
@@ -90,6 +103,7 @@ function themePackageDir(nodeModules, themeSpec) {
 }
 
 function extractProps(source) {
+  // 从主题 layout 源码中提取可传属性；这里只做能力提示，不执行源码。
   const body = source.match(/defineProps\(\s*\{([\s\S]*?)^\}\s*\)/m)?.[1] || ''
   const props = []
   for (const match of body.matchAll(/^\s*['"]?([A-Za-z_$][\w$-]*)['"]?\s*:\s*\{/gm)) {
@@ -99,6 +113,7 @@ function extractProps(source) {
 }
 
 function extractSlots(source) {
+  // 命名 slot 决定生成器应使用的 ::slot:: Markdown 区域。
   const slots = []
   for (const match of source.matchAll(/<slot(?:\s+[^>]*?\bname=["']([^"']+)["'])?[^>]*>/g)) {
     const name = match[1] || 'default'
@@ -108,6 +123,7 @@ function extractSlots(source) {
 }
 
 function layoutUsage(name, slots) {
+  // 把主题作者的英文 layout 名转成生成模型可理解的中文语义。
   if (/cover|intro|lead/.test(name)) return '封面、开场或新章节引入；使用短标题和一句核心信息'
   if (/section/.test(name)) return '章节过渡；只呈现章节名和简短提示'
   if (/quote/.test(name)) return '引用、核心观点或关键原文；正文必须简短'
@@ -127,6 +143,7 @@ function layoutUsage(name, slots) {
 }
 
 function markdownPattern(slots) {
+  // 给每个 layout 构造可直接进入 prompt 的最小写法示例。
   const named = slots.filter((slot) => slot !== 'default')
   if (!named.length) return '# {{title}}\n\n{{body}}'
   const rows = named.map((slot) => `::${slot}::\n{{${slot}}}`)
@@ -146,6 +163,7 @@ async function directoryVueNames(directory) {
 }
 
 async function buildCapabilities(themeSpec, nodeModules) {
+  // manifest 带 schema_version；扫描逻辑变化后会自动重建旧缓存。
   const cacheFile = path.join(packageThemeDir(themeSpec), 'capabilities.json')
   try {
     const cached = JSON.parse(await readFile(cacheFile, 'utf8'))
@@ -186,12 +204,14 @@ async function buildCapabilities(themeSpec, nodeModules) {
 }
 
 async function capabilities(payload) {
+  // 确保包已缓存后返回布局、组件和样式能力清单。
   const themeSpec = validatedTheme(payload)
   const nodeModules = await ensureThemePackage(themeSpec)
   return buildCapabilities(themeSpec, nodeModules)
 }
 
 async function installTheme(target, themeSpec) {
+  // 在临时目录安装，再原子 rename 到缓存，失败不会污染可用版本。
   await mkdir(target, { recursive: true })
   await mkdir(npmCacheRoot, { recursive: true })
   await execFileAsync(
@@ -221,6 +241,7 @@ async function installTheme(target, themeSpec) {
 }
 
 async function linkHostDependencies(target) {
+  // 主题运行时复用镜像中的 Vue/Slidev 依赖，减少每个主题重复安装。
   const nodeModules = path.join(target, 'node_modules')
   await mkdir(nodeModules, { recursive: true })
   for (const packageName of [
@@ -246,6 +267,7 @@ async function linkHostDependencies(target) {
 }
 
 async function cachedPackage(themeSpec) {
+  // 校验完成标记后才认为缓存可用。
   const target = packageThemeDir(themeSpec)
   try {
     const marker = JSON.parse(await readFile(path.join(target, 'theme.json'), 'utf8'))
@@ -258,6 +280,7 @@ async function cachedPackage(themeSpec) {
 }
 
 async function legacyProjectCache(themeSpec) {
+  // 兼容旧版按项目缓存，把已有包提升到全局复用缓存。
   try {
     const entries = await readdir(themeRoot, { withFileTypes: true })
     for (const entry of entries) {
@@ -278,6 +301,7 @@ async function legacyProjectCache(themeSpec) {
 }
 
 async function ensureThemePackage(themeSpec) {
+  // installs Map 合并同一主题的并发下载；后续项目直接复用落盘包。
   const cached = await cachedPackage(themeSpec)
   if (cached) {
     await linkHostDependencies(path.dirname(cached))
@@ -322,6 +346,7 @@ async function ensureThemePackage(themeSpec) {
 }
 
 async function prepare(payload) {
+  // 为项目创建指向全局包缓存的轻量绑定，并返回能力清单。
   const themeSpec = validatedTheme(payload)
   const target = projectThemeDir(payload.project_id)
   await ensureThemePackage(themeSpec)
@@ -335,6 +360,7 @@ async function prepare(payload) {
 }
 
 async function render(payload) {
+  // 在受控 job 目录调用 Slidev export，生成后端期待的 PPTX。
   const { job_id: jobId, project_id: projectId } = payload
   if (!/^[0-9a-f-]{36}$/i.test(jobId || '')) throw new Error('INVALID_JOB_ID')
   const themeSpec = validatedTheme(payload)
@@ -377,6 +403,7 @@ async function render(payload) {
 }
 
 async function renderPreview(payload) {
+  // 只渲染请求页的 PNG，供后端按制品版本缓存。
   const { job_id: jobId, project_id: projectId } = payload
   if (!/^[0-9a-f-]{36}$/i.test(jobId || '')) throw new Error('INVALID_JOB_ID')
   const slideOrder = Number(payload.slide_order)

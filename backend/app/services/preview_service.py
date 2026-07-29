@@ -1,3 +1,9 @@
+"""单页 Slidev 预览的主题装配、请求去重与 PNG 缓存。
+
+同一“版本 + 主题”使用锁合并并发渲染；renderer 生成的 PNG 按制品版本落盘，
+后续请求直接命中缓存。实时编辑的 iframe 预览由前端 SlidevPreview 负责。
+"""
+
 from __future__ import annotations
 
 import shutil
@@ -20,11 +26,13 @@ _preview_locks_guard = threading.Lock()
 
 
 def _lock_for(key: str) -> threading.Lock:
+    """为相同预览键复用互斥锁，避免重复启动 Slidev。"""
     with _preview_locks_guard:
         return _preview_locks.setdefault(key, threading.Lock())
 
 
 def _themed_deck(project: Project, content: dict) -> tuple[dict, dict]:
+    """把项目主题能力合并进课件副本，同时返回主题配置。"""
     theme = get_theme(project.theme_id)
     if not theme:
         raise ValueError("项目选择的主题不存在")
@@ -57,6 +65,7 @@ def render_slide_preview(
     slide_id: str,
     version_no: int | None = None,
 ) -> Path:
+    """返回指定版本/页面的缓存 PNG；未命中时调用 renderer 生成。"""
     if artifact.type != "slide_deck":
         raise ValueError("只有课件支持主题预览")
     version: ArtifactVersion | None = (

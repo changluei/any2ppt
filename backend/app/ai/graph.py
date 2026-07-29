@@ -1,3 +1,10 @@
+"""课件生成 LangGraph 的状态、质量审查与路由规则。
+
+节点实现由 graph_service 注入，本模块定义 LessonState、确定性质量规则、
+可选模型复核、返工范围和 human_review 暂停点。GraphRun 持久化状态后，
+容器重启仍可以从节点边界恢复。
+"""
+
 from __future__ import annotations
 
 import json
@@ -22,6 +29,7 @@ MAX_REPAIR_ATTEMPTS = 2
 
 
 class CheckpointAdapter(Protocol):
+    """生成图对检查点存储所需的最小接口。"""
     """Persistence contract implemented by GraphRunCheckpointStore in the service layer."""
 
     def load(self, project_id: str, trace_id: str) -> dict[str, Any] | None: ...
@@ -30,6 +38,7 @@ class CheckpointAdapter(Protocol):
 
 
 class ReviewerIssue(BaseModel):
+    """可定位到具体制品或页面的质量问题。"""
     issue_type: str
     target_id: str
     severity: Literal["warn", "fail"]
@@ -37,10 +46,12 @@ class ReviewerIssue(BaseModel):
 
 
 class ModelReviewOutput(BaseModel):
+    """LLM 质量复核的结构化结果。"""
     issues: list[ReviewerIssue] = Field(default_factory=list)
 
 
 class LessonState(TypedDict, total=False):
+    """节点间传递且可写入 JSON 的共享状态。"""
     project: dict[str, Any]
     context: dict[str, Any]
     retrieval_summary: dict[str, Any]
@@ -77,6 +88,7 @@ def _issue(issue_type: str, target_id: str, severity: str, suggestion: str) -> d
 
 
 def review_artifacts(artifacts: dict[str, dict]) -> list[dict]:
+    """执行结构、关联、时长、引用与文字密度的确定性检查。"""
     issues: list[dict] = []
     plan = artifacts.get("lesson_plan", {})
     deck = artifacts.get("slide_deck", {})
@@ -170,6 +182,7 @@ def review_artifacts(artifacts: dict[str, dict]) -> list[dict]:
 
 
 def review_quality(artifacts: dict[str, dict], *, llm=None, trace_id: str | None = None) -> list[dict]:
+    """合并规则与可选模型复核；模型失败不会吞掉规则结果。"""
     """Deterministic rules are authoritative; a structured model reviewer may add pedagogical warnings."""
     deterministic = review_artifacts(artifacts)
     client = llm or DeepSeekClient()
@@ -208,10 +221,12 @@ def review_quality(artifacts: dict[str, dict], *, llm=None, trace_id: str | None
 
 
 def initial_node_state() -> list[dict[str, Any]]:
+    """为前端生成进度条构造完整节点初始状态。"""
     return [{"node_id": node, "status": "pending", "attempt": 0, "issues": []} for node in NODES]
 
 
 def _repair_scope(issues: list[dict]) -> str:
+    """依据问题类型决定返工蓝图、页面或局部内容。"""
     failing = {item["issue_type"] for item in issues if item.get("severity") == "fail"}
     if failing & {"objective_without_activity", "objective_unassessed", "unknown_objective"}:
         return "design"
@@ -236,6 +251,7 @@ def _repair_scope(issues: list[dict]) -> str:
 
 
 def route_after_review(state: LessonState) -> str:
+    """质量审查后决定返工、人工确认或结束。"""
     if state.get("cancelled"):
         return "cancelled"
     if state.get("failed"):
@@ -252,6 +268,7 @@ def route_after_review(state: LessonState) -> str:
 
 
 def route_after_slides(state: LessonState) -> str:
+    """页面节点后优先处理取消/失败，再进入练习节点。"""
     if state.get("cancelled"):
         return "cancelled"
     if state.get("failed"):
@@ -268,6 +285,7 @@ def _continue_after_step(state: LessonState, next_node: str) -> str:
 
 
 def route_after_human(state: LessonState) -> str:
+    """把用户 accept/revise/cancel 映射到图的下一条边。"""
     decision = state.get("human_decision")
     if decision == "accept":
         return "finalize"
@@ -292,6 +310,7 @@ def build_langgraph(
     on_node_event: Callable[[str, str, dict[str, Any]], None] | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ):
+    """使用 service 注入的 handler 构建可执行 StateGraph。"""
     """Build the conditional graph with resumable entry and persistence hooks."""
     try:
         from langgraph.graph import END, StateGraph

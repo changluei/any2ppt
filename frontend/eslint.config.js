@@ -1,3 +1,4 @@
+// Vue + TypeScript 的 flat ESLint 配置；构建产物、覆盖率与类型声明不参与检查。
 import eslint from '@eslint/js'
 import eslintPluginVue from 'eslint-plugin-vue'
 import globals from 'globals'

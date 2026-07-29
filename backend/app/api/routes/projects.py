@@ -1,3 +1,9 @@
+"""项目、“我的演示”、主题准备和生成任务 API。
+
+创建项目时登记并准备所选主题；生成请求使用幂等键避免重复点击创建多个
+任务，并立即把长耗时工作交给后台执行。
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -25,11 +31,13 @@ VALID_TASK_TYPES = {"full_lesson", *(item.id for item in SKILLS)}
 
 @router.get("", response_model=list[ProjectOut])
 def list_projects_route(db: Session = Depends(get_db)):
+    """返回“我的演示”列表。"""
     return list_projects(db)
 
 
 @router.post("", response_model=ProjectOut, status_code=201)
 def create_project(data: ProjectCreate, db: Session = Depends(get_db)):
+    """创建项目、校验知识库选择，并准备所选 Slidev 主题。"""
     if not get_theme(data.theme_id):
         raise HTTPException(400, detail={"code": "THEME_NOT_FOUND", "message": "所选模板不存在或尚未通过兼容检查"})
     ensure_knowledge_bases(db)
@@ -53,6 +61,7 @@ def create_project(data: ProjectCreate, db: Session = Depends(get_db)):
 
 @router.get("/{project_id}", response_model=ProjectOut)
 def get_project_route(project_id: str, db: Session = Depends(get_db)):
+    """返回项目详情。"""
     project = get_project(db, project_id)
     if not project:
         raise HTTPException(404, detail={"code": "PROJECT_NOT_FOUND", "message": "项目不存在"})
@@ -61,6 +70,7 @@ def get_project_route(project_id: str, db: Session = Depends(get_db)):
 
 @router.put("/{project_id}", response_model=ProjectOut)
 def update_project(project_id: str, data: ProjectCreate, db: Session = Depends(get_db)):
+    """更新生成参数；主题变化时重新执行缓存准备。"""
     project = get_project(db, project_id)
     if not project:
         raise HTTPException(404, detail={"code": "PROJECT_NOT_FOUND", "message": "项目不存在"})
@@ -89,6 +99,7 @@ def update_project(project_id: str, data: ProjectCreate, db: Session = Depends(g
 
 @router.delete("/{project_id}", status_code=204)
 def delete_project(project_id: str, force: bool = Query(False), db: Session = Depends(get_db)):
+    """默认先返回关联对象统计，只有 force 才执行级联清理。"""
     project = get_project(db, project_id)
     if not project:
         raise HTTPException(404, detail={"code": "PROJECT_NOT_FOUND", "message": "项目不存在"})
@@ -135,6 +146,7 @@ def delete_project(project_id: str, force: bool = Query(False), db: Session = De
 
 @router.post("/{project_id}/theme/prepare", response_model=ProjectOut)
 def retry_project_theme(project_id: str, db: Session = Depends(get_db)):
+    """主题下载失败后手动重试，不需要重建项目。"""
     project = get_project(db, project_id)
     if not project:
         raise HTTPException(404, detail={"code": "PROJECT_NOT_FOUND", "message": "项目不存在"})
@@ -154,6 +166,7 @@ def retry_project_theme(project_id: str, db: Session = Depends(get_db)):
 
 @router.post("/{project_id}/tasks", response_model=TaskOut, status_code=202)
 def create_task(project_id: str, data: TaskCreate, request: Request, background: BackgroundTasks, db: Session = Depends(get_db)):
+    """冻结生成输入、创建幂等任务并安排后台生成。"""
     project = get_project(db, project_id)
     if not project:
         raise HTTPException(404, detail={"code": "PROJECT_NOT_FOUND", "message": "项目不存在"})
@@ -206,6 +219,7 @@ def create_task(project_id: str, data: TaskCreate, request: Request, background:
 
 @router.get("/{project_id}/tasks", response_model=list[TaskOut])
 def recent_tasks(project_id: str, db: Session = Depends(get_db)):
+    """列出项目最近任务，供生成页刷新后恢复进度。"""
     if not get_project(db, project_id):
         raise HTTPException(404, detail={"code": "PROJECT_NOT_FOUND", "message": "项目不存在"})
     return db.query(AITask).filter_by(project_id=project_id).order_by(AITask.created_at.desc()).limit(20).all()
@@ -213,6 +227,7 @@ def recent_tasks(project_id: str, db: Session = Depends(get_db)):
 
 @router.get("/{project_id}/artifacts", response_model=list[ArtifactOut])
 def list_artifacts(project_id: str, db: Session = Depends(get_db)):
+    """列出项目当前可编辑或导出的制品。"""
     if not get_project(db, project_id):
         raise HTTPException(404, detail={"code": "PROJECT_NOT_FOUND", "message": "项目不存在"})
     artifacts = db.query(LessonArtifact).filter_by(project_id=project_id).all()

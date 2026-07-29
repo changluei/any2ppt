@@ -1,3 +1,8 @@
+"""服务启动时收敛上次异常退出留下的 running 状态。
+
+不会盲目重放可能有副作用的任务，而是标记为可重试失败并保留图检查点。
+"""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -7,6 +12,7 @@ from app.models import AITask, ExportJob, GraphRun
 
 
 def recover_interrupted_work() -> dict[str, int]:
+    """修复中断任务、图和导出记录，并返回各类数量。"""
     """Close stale in-process jobs after a restart so the UI can offer an explicit retry."""
     db = SessionLocal()
     counts = {"tasks": 0, "graphs": 0, "exports": 0}

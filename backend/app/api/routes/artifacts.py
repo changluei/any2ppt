@@ -1,3 +1,9 @@
+"""课件制品的读取、预览、局部修订、自动保存、图片放置与回滚 API。
+
+路由层负责资源边界、HTTP 错误翻译和参数转交；版本冲突、内容校验与新版本
+创建都由 artifact_service 处理。
+"""
+
 from __future__ import annotations
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -22,6 +28,7 @@ router = APIRouter(prefix="/api/artifacts", tags=["artifacts"])
 
 @router.get("/{artifact_id}", response_model=ArtifactOut)
 def get_artifact(artifact_id: str, version: Optional[int] = None, db: Session = Depends(get_db)):
+    """读取当前版本或指定历史版本。"""
     artifact = db.get(LessonArtifact, artifact_id)
     if not artifact:
         raise HTTPException(404, detail={"code": "ARTIFACT_NOT_FOUND", "message": "产物不存在"})
@@ -33,6 +40,7 @@ def get_artifact(artifact_id: str, version: Optional[int] = None, db: Session = 
 
 @router.get("/{artifact_id}/versions", response_model=list[ArtifactOut])
 def versions(artifact_id: str, db: Session = Depends(get_db)):
+    """列出可用于版本选择器和回滚的版本摘要。"""
     artifact = db.get(LessonArtifact, artifact_id)
     if not artifact:
         raise HTTPException(404, detail={"code": "ARTIFACT_NOT_FOUND", "message": "产物不存在"})
@@ -41,6 +49,7 @@ def versions(artifact_id: str, db: Session = Depends(get_db)):
 
 @router.get("/{artifact_id}/preview/{slide_id}")
 def preview(artifact_id: str, slide_id: str, version: Optional[int] = None, db: Session = Depends(get_db)):
+    """把单页 Markdown 交给 Slidev renderer，返回实时预览 HTML。"""
     artifact = db.get(LessonArtifact, artifact_id)
     if not artifact:
         raise HTTPException(404, detail={"code": "ARTIFACT_NOT_FOUND", "message": "产物不存在"})
@@ -55,6 +64,7 @@ def preview(artifact_id: str, slide_id: str, version: Optional[int] = None, db: 
 
 @router.post("/{artifact_id}/revise", response_model=ArtifactOut)
 def revise(artifact_id: str, data: RevisionRequest, db: Session = Depends(get_db)):
+    """按自然语言指令局部修订，并创建不可变的新版本。"""
     artifact = db.get(LessonArtifact, artifact_id)
     if not artifact:
         raise HTTPException(404, detail={"code": "ARTIFACT_NOT_FOUND", "message": "产物不存在"})
@@ -72,6 +82,7 @@ def revise(artifact_id: str, data: RevisionRequest, db: Session = Depends(get_db
 
 @router.post("/{artifact_id}/markdown", response_model=ArtifactOut)
 def save_markdown(artifact_id: str, data: SlideMarkdownUpdate, db: Session = Depends(get_db)):
+    """自动保存当前页 Markdown；过期 base_version 会返回 409。"""
     artifact = db.get(LessonArtifact, artifact_id)
     if not artifact:
         raise HTTPException(404, detail={"code": "ARTIFACT_NOT_FOUND", "message": "产物不存在"})
@@ -96,6 +107,7 @@ def save_markdown(artifact_id: str, data: SlideMarkdownUpdate, db: Session = Dep
 
 @router.post("/{artifact_id}/images", response_model=ArtifactOut)
 def place_image(artifact_id: str, data: SlideImagePlacementCreate, db: Session = Depends(get_db)):
+    """在一页中记录图片引用与布局，不复制图片文件。"""
     artifact = db.get(LessonArtifact, artifact_id)
     image = db.get(ProjectImage, data.image_id)
     if not artifact:
@@ -130,6 +142,7 @@ def unplace_image(
     base_version_no: int,
     db: Session = Depends(get_db),
 ):
+    """移除指定页上的图片引用，并创建新版本。"""
     artifact = db.get(LessonArtifact, artifact_id)
     if not artifact:
         raise HTTPException(404, detail={"code": "ARTIFACT_NOT_FOUND", "message": "产物不存在"})
@@ -148,6 +161,7 @@ def unplace_image(
 
 @router.post("/{artifact_id}/rollback/{version_no}", response_model=ArtifactOut)
 def rollback(artifact_id: str, version_no: int, db: Session = Depends(get_db)):
+    """以历史内容创建新的当前版本，历史版本本身仍保持不可变。"""
     artifact = db.get(LessonArtifact, artifact_id)
     if not artifact:
         raise HTTPException(404, detail={"code": "ARTIFACT_NOT_FOUND", "message": "产物不存在"})

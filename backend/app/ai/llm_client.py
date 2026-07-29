@@ -1,3 +1,9 @@
+"""DeepSeek 文本模型客户端与结构化输出修复。
+
+所有模型调用经由本模块统一设置超时、温度、重试和 trace 信息。上层只依赖
+invoke/invoke_structured，不直接处理 httpx 异常或 Markdown JSON 代码块。
+"""
+
 from __future__ import annotations
 
 import json
@@ -27,6 +33,7 @@ TModel = TypeVar("TModel", bound=BaseModel)
 
 @dataclass(frozen=True)
 class LLMResult:
+    """模型文本、耗时、重试次数与 token 用量的统一结果。"""
     text: str
     model: str
     elapsed_ms: int
@@ -37,6 +44,7 @@ class LLMResult:
 
 
 def _extract_json(text: str) -> dict:
+    """从纯 JSON 或 Markdown fenced JSON 中提取对象。"""
     stripped = text.strip()
     fenced = re.match(r"^```(?:json)?\s*(.*?)\s*```$", stripped, flags=re.DOTALL | re.IGNORECASE)
     if fenced:
@@ -51,6 +59,7 @@ def _extract_json(text: str) -> dict:
 
 
 class DeepSeekClient:
+    """OpenAI 兼容的 DeepSeek Chat API 适配器。"""
     """OpenAI-compatible DeepSeek adapter; SDK calls never leak into business code."""
 
     def __init__(self, settings=None, client_factory: Callable[..., Any] | None = None):

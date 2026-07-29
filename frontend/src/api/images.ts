@@ -1,3 +1,4 @@
+/** 项目图片列表、上传进度与受控内容 URL。 */
 import { http, listData, objectData } from './http'
 import type { ProjectImage } from '../types'
 

@@ -1,3 +1,9 @@
+"""四个持久知识库的目录初始化、选择校验与跨库检索。
+
+这里维护官方语数英和 personal 的固定定义；实际 chunk 与向量检索由
+ProjectVectorStore 完成。
+"""
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -46,6 +52,7 @@ KNOWLEDGE_BASE_IDS = {row["id"] for row in KNOWLEDGE_BASE_DEFINITIONS}
 
 
 def ensure_knowledge_bases(db: Session) -> list[KnowledgeBase]:
+    """幂等创建或修正四个内置知识库，保留已有统计和资料。"""
     existing = {row.id: row for row in db.query(KnowledgeBase).all()}
     changed = False
     for definition in KNOWLEDGE_BASE_DEFINITIONS:
@@ -87,6 +94,7 @@ def ensure_knowledge_bases(db: Session) -> list[KnowledgeBase]:
 
 
 def validate_knowledge_base_ids(db: Session, ids: Iterable[str], *, require_ready: bool = True) -> list[str]:
+    """去重并验证 ID；生成时可要求库已 ready，personal 空库除外。"""
     unique = list(dict.fromkeys(ids))
     if not unique:
         return []
@@ -117,6 +125,7 @@ def search_knowledge_bases(
     store: ProjectVectorStore | None = None,
     min_score: float | None = None,
 ) -> list[dict]:
+    """逐库检索、按 source/chunk 去重，再返回全局得分最高的 top_k。"""
     vector_store = store or ProjectVectorStore()
     merged: dict[tuple[str, str], dict] = {}
     for library_id in library_ids:

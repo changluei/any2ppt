@@ -1,3 +1,10 @@
+"""FastAPI 应用入口。
+
+本模块只负责应用级装配：启动时修复/初始化持久化状态、注册跨域与 trace_id
+中间件、统一异常响应，以及挂载各业务路由。具体业务规则应留在 services/，
+避免路由层和应用入口逐渐演变成难以测试的“大函数”。
+"""
+
 import uuid
 from contextlib import asynccontextmanager
 
@@ -24,6 +31,11 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    """在开始接收请求前准备四类知识库，并恢复异常中断的后台任务。
+
+    这些操作刻意放在路由注册之外，因此无论由 Uvicorn、测试客户端还是
+    Docker 启动，服务都能获得一致的初始状态。
+    """
     with SessionLocal() as db:
         ensure_knowledge_bases(db)
     migrate_legacy_personal_indexes()
@@ -47,11 +59,13 @@ app.add_middleware(
 
 
 def _trace_id(request: Request) -> str:
+    """返回当前请求的链路标识；异常发生得过早时生成一个兜底值。"""
     return getattr(request.state, "trace_id", str(uuid.uuid4()))
 
 
 @app.middleware("http")
 async def trace_middleware(request: Request, call_next):
+    """让前端报错、后端日志和 AI 调用可以用同一个 X-Trace-ID 串联。"""
     request.state.trace_id = request.headers.get("X-Trace-ID") or str(uuid.uuid4())
     response = await call_next(request)
     response.headers["X-Trace-ID"] = request.state.trace_id
@@ -60,6 +74,7 @@ async def trace_middleware(request: Request, call_next):
 
 @app.exception_handler(HTTPException)
 async def http_error(request: Request, exc: HTTPException):
+    """把 FastAPI 的多种 HTTPException detail 写法归一成前端约定的 error。"""
     detail = exc.detail
     if isinstance(detail, dict):
         error = {
@@ -77,6 +92,7 @@ async def http_error(request: Request, exc: HTTPException):
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(request: Request, exc: RequestValidationError):
+    """保留 Pydantic 的字段级错误，同时使用统一错误信封。"""
     return JSONResponse(
         status_code=422,
         content={
@@ -92,6 +108,7 @@ async def validation_error(request: Request, exc: RequestValidationError):
 
 @app.exception_handler(Exception)
 async def unhandled_error(request: Request, exc: Exception):
+    """隐藏内部异常细节，仅向客户端暴露可用于排障的 trace_id。"""
     return JSONResponse(
         status_code=500,
         content={
@@ -106,11 +123,13 @@ async def unhandled_error(request: Request, exc: Exception):
 
 @app.get("/health")
 def health():
+    """无需外部依赖的存活探针。"""
     return {"status": "ok", "service": "backend", "version": app.version}
 
 
 @app.get("/health/db")
 def health_db():
+    """执行最小 SQL，验证 MySQL/测试 SQLite 的连接确实可用。"""
     try:
         with SessionLocal() as db:
             db.execute(text("SELECT 1"))
@@ -125,6 +144,7 @@ def health_db():
 
 @app.get("/health/ai")
 def health_ai():
+    """报告 DeepSeek 是否已配置；degraded 不代表后端整体不可用。"""
     configured = bool(settings.deepseek_api_key.strip()) and not settings.ai_force_fallback
     return {
         "status": "ok" if configured else "degraded",
@@ -137,6 +157,7 @@ def health_ai():
 
 @app.get("/health/chroma")
 def health_chroma():
+    """报告向量库实现；缺少 Chroma 时开发环境会显示 JSON 兜底。"""
     store = ProjectVectorStore()
     return {
         "status": "ok",
@@ -147,16 +168,19 @@ def health_chroma():
 
 @app.get("/api/skills")
 def skills():
+    """公开生成流水线中可用的教学技能注册表。"""
     return registry()
 
 
 @app.get("/api/themes")
 def themes():
+    """返回首页主题卡片需要的脱敏主题元数据。"""
     return public_themes()
 
 
 @app.post("/api/themes/recommend")
 def recommend_theme(data: ThemeRecommendationRequest):
+    """依据课题上下文推荐主题，但不会在此时下载或安装主题。"""
     return select_theme(
         LessonContext(
             project_id="theme-preview",

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+/** 列表为空时的统一占位组件。 */
 defineProps<{ text?: string }>()
 </script>
 

@@ -1,3 +1,9 @@
+"""项目图片资产 API。
+
+DeepSeek 文本模型不能理解图片内容，因此上传只负责格式/尺寸校验和文件保存；
+图片放到哪一页、哪个位置由用户指令和 Agent 的 place_image 工具决定。
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -25,6 +31,7 @@ async def upload_image(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
+    """上传并去重一张项目图片，返回后续引用所需的 image_id。"""
     if not db.get(Project, project_id):
         raise HTTPException(404, detail={"code": "PROJECT_NOT_FOUND", "message": "项目不存在"})
     try:
@@ -42,6 +49,7 @@ async def upload_image(
 
 @router.get("/api/projects/{project_id}/images", response_model=list[ProjectImageOut])
 def list_images(project_id: str, db: Session = Depends(get_db)):
+    """列出项目图片库，不在列表响应中传输二进制内容。"""
     if not db.get(Project, project_id):
         raise HTTPException(404, detail={"code": "PROJECT_NOT_FOUND", "message": "项目不存在"})
     rows = (
@@ -55,6 +63,7 @@ def list_images(project_id: str, db: Session = Depends(get_db)):
 
 @router.get("/api/images/{image_id}/content")
 def image_content(image_id: str, db: Session = Depends(get_db)):
+    """通过受控 API 返回图片文件，避免暴露真实磁盘路径。"""
     image = db.get(ProjectImage, image_id)
     if not image:
         raise HTTPException(404, detail={"code": "IMAGE_NOT_FOUND", "message": "图片不存在"})

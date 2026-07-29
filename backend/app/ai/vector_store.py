@@ -1,3 +1,10 @@
+"""知识片段与 embedding 的持久化检索层。
+
+首选 Chroma：每个知识库使用稳定 collection；早期项目级 collection 仍保留
+兼容。若测试环境没有 chromadb，则以 JSON 文件和词法得分降级。MySQL 只存
+SourceDocument/KnowledgeBase 统计，chunk 正文、向量和定位元数据都在这里。
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -14,6 +21,7 @@ from .exceptions import RetrievalError
 
 
 def _lexical_score(query: str, content: str) -> float:
+    """JSON 降级模式下用 token 交集近似相关度。"""
     query_tokens = set(tokenize_zh(query))
     content_tokens = set(tokenize_zh(content))
     if not query_tokens or not content_tokens:
@@ -22,12 +30,14 @@ def _lexical_score(query: str, content: str) -> float:
 
 
 def _safe_project_key(project_id: str) -> str:
+    """把外部 ID 收敛成安全的 collection/文件名片段。"""
     slug = re.sub(r"[^a-zA-Z0-9_-]", "_", project_id).strip("_-")[:32] or "project"
     digest = hashlib.sha256(project_id.encode("utf-8")).hexdigest()[:12]
     return f"project_{slug}_{digest}"
 
 
 class ProjectVectorStore:
+    """封装 Chroma 与 JSON fallback 的增删查和 collection 命名规则。"""
     """Project-isolated Chroma adapter with an explicit JSON fallback for tests."""
 
     def __init__(

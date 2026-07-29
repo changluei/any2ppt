@@ -1,3 +1,7 @@
+/**
+ * 页面无关的表单校验、导航路径和工作台衍生规则。
+ * 纯函数集中在此便于 Vitest 覆盖，避免把可测试规则埋在大型 Vue 组件中。
+ */
 import type { Exercise, LessonStage, ProjectInput, Task } from '../types'
 
 export function validateProject(form: ProjectInput): string | null {

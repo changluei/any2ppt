@@ -1,3 +1,9 @@
+"""上传资料的文件保存、后台解析入库、旧索引迁移与删除。
+
+资料先写磁盘和 MySQL，再由后台任务解析为 chunks 并写入 personal Chroma
+collection。状态按 uploaded → indexing → ready/failed 演进。
+"""
+
 import hashlib
 import re
 import uuid
@@ -21,6 +27,7 @@ ALLOWED = {
 
 
 def safe_filename(name: str) -> str:
+    """剥离目录与危险字符，保留展示和扩展名所需的安全文件名。"""
     value = Path(name).name
     value = re.sub(r"[^\w.\-\u4e00-\u9fff]", "_", value)
     if not value or value in {".", ".."}:
@@ -35,6 +42,7 @@ def save_upload(
     content_type: str,
     data: bytes,
 ) -> SourceDocument:
+    """校验并保存资料；相同内容已在个人库时直接返回已有记录。"""
     settings = get_settings()
     clean = safe_filename(filename)
     suffix = Path(clean).suffix.lower()
@@ -79,6 +87,7 @@ def save_upload(
 
 
 def index_source(source_id: str) -> None:
+    """后台解析文件、切片、embedding 入库并更新知识库统计。"""
     from app.core.database import SessionLocal
     db = SessionLocal()
     try:
@@ -109,6 +118,7 @@ def index_source(source_id: str) -> None:
 
 
 def migrate_legacy_personal_indexes() -> int:
+    """把早期 project collection 幂等迁移到共享 personal collection。"""
     """Copy ready project-era documents into the durable personal namespace once."""
     from app.core.database import SessionLocal
 
@@ -132,6 +142,7 @@ def migrate_legacy_personal_indexes() -> int:
 
 
 def delete_source(db: Session, source: SourceDocument) -> None:
+    """协调删除向量、文件和 MySQL 记录，并刷新知识库统计。"""
     try:
         ProjectVectorStore().delete_by_source(source.knowledge_base_id, source.id)
     except Exception as exc:

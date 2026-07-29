@@ -1,3 +1,10 @@
+"""上传资料的解析、清洗与重叠切片。
+
+支持 PDF、DOCX、Markdown 和纯文本。每个 Chunk 保留页码/标题/段落定位与
+内容哈希，既用于引用追溯，也用于去重；此模块只生成 chunk，不直接写数据库
+或向量库。
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -11,6 +18,7 @@ from .exceptions import IngestionError
 
 @dataclass(frozen=True)
 class ParsedBlock:
+    """从原文抽取的最小结构块及其可读位置。"""
     content: str
     location: str
     heading: str = ""
@@ -23,6 +31,7 @@ class ParsedBlock:
 
 @dataclass(frozen=True)
 class Chunk:
+    """适合 embedding 的文本片段和可追溯元数据。"""
     chunk_id: str
     content: str
     location: str
@@ -31,15 +40,18 @@ class Chunk:
 
 
 def _clean(text: str) -> str:
+    """规范换行和空白，降低格式噪声对检索的影响。"""
     lines = [re.sub(r"[ \t\u3000]+", " ", line).strip() for line in text.replace("\r", "").split("\n")]
     return "\n".join(line for line in lines if line).strip()
 
 
 def _hash(text: str) -> str:
+    """生成稳定短哈希，作为 chunk 标识的一部分。"""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _text_blocks(text: str, *, markdown: bool) -> list[ParsedBlock]:
+    """按 Markdown 标题或自然段切出文本结构块。"""
     lines = text.replace("\r", "").split("\n")
     blocks: list[ParsedBlock] = []
     heading = "正文"
@@ -83,6 +95,7 @@ def _text_blocks(text: str, *, markdown: bool) -> list[ParsedBlock]:
 
 
 def _repeated_pdf_edges(page_texts: list[str]) -> set[str]:
+    """识别多页重复页眉页脚，避免它们污染高频检索结果。"""
     if len(page_texts) < 3:
         return set()
     candidates: list[str] = []
@@ -95,6 +108,7 @@ def _repeated_pdf_edges(page_texts: list[str]) -> set[str]:
 
 
 def parse_document(path: Path) -> list[ParsedBlock]:
+    """按扩展名解析文件；无法提取有效文本时抛出 IngestionError。"""
     suffix = path.suffix.lower()
     try:
         if suffix in {".txt", ".md"}:
@@ -171,6 +185,7 @@ def split_blocks(
     chunk_size: int = 500,
     overlap: int = 60,
 ) -> list[Chunk]:
+    """按字符窗口切片，并保留 overlap 以减少语义在边界处断裂。"""
     if chunk_size < 10:
         raise ValueError("chunk_size 不能小于 10")
     if overlap < 0 or overlap >= chunk_size:

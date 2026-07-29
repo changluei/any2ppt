@@ -1,4 +1,8 @@
 <script setup lang="ts">
+/**
+ * “我的演示”页面，同时承担历史记录能力。
+ * 支持搜索、继续编辑、回到创建向导修改参数和确认删除。
+ */
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Delete, EditPen, MoreFilled, Plus, Refresh, Search } from '@element-plus/icons-vue'

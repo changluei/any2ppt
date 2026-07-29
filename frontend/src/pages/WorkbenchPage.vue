@@ -1,4 +1,10 @@
 <script setup lang="ts">
+/**
+ * 三栏工作台：左侧缩略图，中间预览/浅色 Markdown，右侧 AI 对话。
+ *
+ * Markdown 防抖自动保存；Agent 返回新 artifact 后立即同步制品、版本与草稿，
+ * 从而同时刷新预览和源码。右栏只保留可滚动聊天流与固定输入框。
+ */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ArrowLeft, Download, MagicStick, Paperclip } from '@element-plus/icons-vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
@@ -73,6 +79,7 @@ function schedule() {
 }
 
 async function loadVersions() {
+  // 版本选择器独立加载，最新版本默认成为当前编辑基线。
   if (!latestDeck.value) {
     versions.value = []
     selectedVersionId.value = ''
@@ -83,6 +90,7 @@ async function loadVersions() {
 }
 
 async function load() {
+  // 并行恢复项目、主题、资料、任务、制品与聊天，刷新后仍回到完整现场。
   loading.value = true
   error.value = undefined
   try {
@@ -138,6 +146,7 @@ async function refresh() {
 }
 
 async function generatePpt() {
+  // “重新生成”也建立 session，随后复用同一强制锁定生成链路。
   if (!canGenerate.value || busy.value) return
   busy.value = 'generate'
   error.value = undefined
@@ -221,12 +230,14 @@ async function downloadPpt() {
 }
 
 function updateArtifact(changed: Artifact) {
+  // 所有变更通过这里同步，避免左侧预览和下方 Markdown 出现版本分叉。
   artifacts.value = artifacts.value.map((item) => item.artifact_id === changed.artifact_id ? changed : item)
   versions.value = [changed, ...versions.value.filter((item) => item.version_id !== changed.version_id)]
   selectedVersionId.value = changed.version_id
 }
 
 function changeMarkdown(markdown: string) {
+  // 先即时更新本地预览，再重置防抖保存；页面不需要“保存修改”按钮。
   const slide = selectedSlide.value
   if (!slide) return
   clearTimeout(markdownAutosaveTimer)
@@ -242,6 +253,7 @@ function changeMarkdown(markdown: string) {
 }
 
 async function flushMarkdownAutosave(): Promise<void> {
+  // 切页/离开前可 await；版本冲突时保留草稿并交给用户处理。
   clearTimeout(markdownAutosaveTimer)
   if (markdownSavePromise) return markdownSavePromise
   const edit = pendingMarkdown
@@ -310,6 +322,7 @@ async function scrollChat() {
 }
 
 async function sendChat() {
+  // 当前页、当前版本与可选图片一起发送，Agent 不会操作未知页面。
   const message = chatInput.value.trim()
   const imageFile = chatImage.value
   if (
@@ -388,6 +401,7 @@ async function removeImage(placementId: string) {
 }
 
 function selectSlide(slideId: string) {
+  // 先提交上一页草稿，再按稳定 slide_id 切页。
   if (markdownDirty.value || markdownSaving.value) {
     queuedSlideId = slideId
     void flushMarkdownAutosave()
@@ -397,6 +411,7 @@ function selectSlide(slideId: string) {
 }
 
 watch(deck, () => {
+  // 仅在不会吞掉未保存输入时，让外部版本覆盖 Markdown 草稿。
   if (!slides.value.some((item) => item.slide_id === selectedSlideId.value)) {
     selectedSlideId.value = slides.value[0]?.slide_id || ''
   }

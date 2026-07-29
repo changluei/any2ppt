@@ -1,3 +1,9 @@
+"""图片文件的校验、去重、持久化与安全响应转换。
+
+数据库提交和磁盘写入在同一服务中协调；失败时清理临时文件，避免出现只有
+记录没有文件或只有文件没有记录的半成品。
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -28,6 +34,7 @@ CANONICAL_MEDIA = {
 
 
 def image_out(image: ProjectImage) -> dict:
+    """转换为前端结构，并生成 API 内容地址而非磁盘路径。"""
     return {
         "id": image.id,
         "project_id": image.project_id,
@@ -48,6 +55,7 @@ def save_image(
     content_type: str,
     data: bytes,
 ) -> ProjectImage:
+    """校验格式、体积和像素，按 SHA-256 去重后保存图片。"""
     settings = get_settings()
     clean = safe_filename(filename)
     suffix = Path(clean).suffix.lower()

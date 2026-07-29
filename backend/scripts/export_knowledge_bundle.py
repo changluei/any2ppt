@@ -1,3 +1,9 @@
+"""把可迁移知识库导出为带校验和的 tar.gz。
+
+归档包含 MySQL 快照、Chroma 持久目录、上传原文和 manifest；不包含代码、
+密钥或临时导出。接收方需用 import_knowledge_bundle.py 恢复。
+"""
+
 from __future__ import annotations
 
 import argparse

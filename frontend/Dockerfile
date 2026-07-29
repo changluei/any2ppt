@@ -1,6 +1,8 @@
+# 第一阶段用锁文件构建 Vue 静态资源；第二阶段只保留 Nginx 和 dist。
 FROM node:22-alpine AS build
 WORKDIR /app
 ARG VITE_API_BASE_URL=http://localhost:8000
+# Vite 在构建时内联 API 地址，修改 .env 后必须重建 frontend 镜像。
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN corepack enable && corepack prepare pnpm@10.14.0 --activate \

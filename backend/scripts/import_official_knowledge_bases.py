@@ -1,3 +1,9 @@
+"""将离线 JSONL 数据集批量导入语文、数学、英语官方知识库。
+
+脚本逐条规范字段、构造可追溯 chunk 和 embedding，并以批次写入 Chroma；
+最终刷新 MySQL KnowledgeBase 统计。官方库只通过该运维入口更新。
+"""
+
 from __future__ import annotations
 
 import argparse

@@ -1,3 +1,10 @@
+"""把纯 ReAct 循环接到项目、课件版本、知识库与图片资产。
+
+ProjectEditorToolbox 是安全边界：模型只能通过白名单工具读取和修改当前项目，
+每个 mutation 仍复用 artifact_service 的版本冲突与事务规则。对话与精简的
+工具轨迹写入 MySQL，页面刷新后可以恢复；DeepSeek 不可用时进入受限规则模式。
+"""
+
 from __future__ import annotations
 
 import re
@@ -22,6 +29,7 @@ from app.services.knowledge_base_service import search_knowledge_bases
 
 
 def message_out(message: EditorAgentMessage) -> dict[str, Any]:
+    """把持久消息转换成 API 结构，不暴露内部 tool_trace。"""
     return {
         "id": message.id,
         "project_id": message.project_id,
@@ -35,6 +43,7 @@ def message_out(message: EditorAgentMessage) -> dict[str, Any]:
 
 
 def list_editor_messages(db: Session, project_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    """读取最近消息，并恢复为从旧到新的聊天顺序。"""
     rows = (
         db.query(EditorAgentMessage)
         .filter(EditorAgentMessage.project_id == project_id)
@@ -46,6 +55,7 @@ def list_editor_messages(db: Session, project_id: str, limit: int = 100) -> list
 
 
 class ProjectEditorToolbox(EditorToolbox):
+    """当前项目/课件范围内的 ReAct 工具实现与本轮临时状态。"""
     def __init__(
         self,
         db: Session,
@@ -66,12 +76,15 @@ class ProjectEditorToolbox(EditorToolbox):
         self.latest_artifact = artifact_out(artifact, artifact.versions[-1])
 
     def close(self) -> None:
+        """释放 Chroma 客户端资源。"""
         self.store.close()
 
     def _current(self) -> dict[str, Any]:
+        """始终读取最新版本，确保连续 mutation 基于上一动作结果。"""
         return self.artifact.versions[-1].content
 
     def _slide(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """按稳定 slide_id 或可读页码解析目标页。"""
         slides = self._current().get("slides", [])
         slide_id = str(arguments.get("slide_id") or "").strip()
         raw_order = arguments.get("order")
@@ -92,6 +105,7 @@ class ProjectEditorToolbox(EditorToolbox):
         return slide
 
     def _inspect_slide(self, slide: dict[str, Any]) -> dict[str, Any]:
+        """返回完整页面和相邻页摘要，并登记“修改前已检查”。"""
         slides = self._current().get("slides", [])
         index = slides.index(slide)
         self.inspected_slides.add(slide["slide_id"])
@@ -110,6 +124,7 @@ class ProjectEditorToolbox(EditorToolbox):
         }
 
     def _validate(self, slide: dict[str, Any]) -> dict[str, Any]:
+        """检查主题布局、slot、文字密度、标题和重复图片。"""
         content = self._current()
         layouts = content.get("theme_layouts", []) or ["default"]
         issues: list[str] = []
@@ -144,6 +159,7 @@ class ProjectEditorToolbox(EditorToolbox):
         }
 
     def execute(self, action: AgentAction, arguments: dict[str, Any]) -> dict[str, Any]:
+        """执行一个白名单动作；任何跨项目或越界请求都在此拒绝。"""
         content = self._current()
         if action == "inspect_deck":
             self.inspected_deck = True
@@ -324,6 +340,7 @@ class ProjectEditorToolbox(EditorToolbox):
 
 
 def _target_slide(content: dict[str, Any], message: str, current_slide_id: str) -> dict[str, Any]:
+    """规则降级模式从“第 N 页”或当前页解析目标。"""
     order_match = re.search(r"第\s*(\d+)\s*(?:页|张)", message)
     order = int(order_match.group(1)) if order_match else 0
     return next(
@@ -337,6 +354,7 @@ def _target_slide(content: dict[str, Any], message: str, current_slide_id: str) 
 
 
 def _fallback_position(message: str) -> str:
+    """规则降级模式从中文方位词选择图片预设位置。"""
     if re.search(r"背景|铺满", message):
         return "background"
     if re.search(r"左侧|左边", message):
@@ -355,6 +373,7 @@ def _fallback_chat(
     current_slide_id: str,
     attachment: ProjectImage | None,
 ) -> tuple[str, dict[str, Any], list[str]]:
+    """模型不可用时执行可预测的图片放置或局部规则修订。"""
     content = artifact.versions[-1].content
     target = _target_slide(content, message, current_slide_id)
     if not target:
@@ -406,6 +425,12 @@ def run_editor_chat(
     base_version_no: int,
     image_id: str | None,
 ) -> dict[str, Any]:
+    """校验版本和附件，持久化用户消息，执行 Agent，再保存事实性回复。
+
+    若模型在 mutation 后中断，已经提交的新版本会保留并明确告知用户；若尚未
+    修改则使用 fallback。返回 artifact 仅在课件真的变化时存在，前端据此
+    同步左侧预览和下方 Markdown，而不必重新进入页面。
+    """
     artifact = (
         db.query(LessonArtifact)
         .filter_by(project_id=project.id, type="slide_deck")

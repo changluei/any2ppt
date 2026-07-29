@@ -1,3 +1,5 @@
+"""AI 长任务的查询、取消与重试 API。"""
+
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from app.core.database import get_db
@@ -10,6 +12,7 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 @router.get("/{task_id}", response_model=TaskOut)
 def get_task(task_id: str, db: Session = Depends(get_db)):
+    """返回生成锁定页轮询所需的最新任务状态。"""
     task = db.get(AITask, task_id)
     if not task:
         raise HTTPException(404, detail={"code": "TASK_NOT_FOUND", "message": "任务不存在"})
@@ -18,6 +21,7 @@ def get_task(task_id: str, db: Session = Depends(get_db)):
 
 @router.post("/{task_id}/cancel", response_model=TaskOut)
 def cancel_task(task_id: str, db: Session = Depends(get_db)):
+    """标记任务取消；执行器会在安全节点边界停止。"""
     task = db.get(AITask, task_id)
     if not task:
         raise HTTPException(404, detail={"code": "TASK_NOT_FOUND", "message": "任务不存在"})
@@ -32,6 +36,7 @@ def cancel_task(task_id: str, db: Session = Depends(get_db)):
 
 @router.post("/{task_id}/retry", response_model=TaskOut)
 def retry_task(task_id: str, background: BackgroundTasks, db: Session = Depends(get_db)):
+    """重置失败任务并沿用原输入快照重新执行。"""
     old = db.get(AITask, task_id)
     if not old:
         raise HTTPException(404, detail={"code": "TASK_NOT_FOUND", "message": "任务不存在"})
@@ -49,4 +54,3 @@ def retry_task(task_id: str, background: BackgroundTasks, db: Session = Depends(
     db.refresh(task)
     background.add_task(run_generation_task, task.id)
     return task
-

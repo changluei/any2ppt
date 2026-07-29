@@ -1,3 +1,9 @@
+/**
+ * 跨路由保存一次生成链路的客户端会话。
+ *
+ * File 对象不能序列化，只保存在内存；其余 ID、幂等键和选择写入
+ * sessionStorage，刷新后 GenerationPage 可以继续轮询已创建的后端任务。
+ */
 import type { ProjectInput } from '../types'
 
 const storageKey = 'any2ppt:active-generation'
@@ -21,6 +27,7 @@ type StoredGenerationSession = Omit<GenerationSession, 'files'>
 let activeSession: GenerationSession | undefined
 
 function persist(session: GenerationSession) {
+  // 明确挑选可序列化字段，避免误把 File 内容或临时对象写入浏览器存储。
   const stored: StoredGenerationSession = {
     mode: session.mode,
     projectId: session.projectId,
@@ -40,6 +47,7 @@ export function beginGenerationSession(
   input: Pick<GenerationSession, 'mode' | 'prompt'> &
     Partial<Pick<GenerationSession, 'projectId' | 'form' | 'sourceIds' | 'knowledgeBaseIds' | 'files'>>,
 ) {
+  // 路由锁保证正常 UI 不会并发开始第二次会话。
   const files = [...(input.files || [])]
   activeSession = {
     mode: input.mode,
@@ -59,6 +67,7 @@ export function beginGenerationSession(
 }
 
 export function getGenerationSession(): GenerationSession | undefined {
+  // 优先返回含 File 的内存对象；刷新后再恢复可序列化的轮询状态。
   if (activeSession) return activeSession
   const raw = window.sessionStorage.getItem(storageKey)
   if (!raw) return undefined
@@ -85,6 +94,7 @@ export function hasActiveGeneration() {
 }
 
 export function clearGenerationSession() {
+  // 同时清理内存和 sessionStorage 才会解除全局导航锁。
   activeSession = undefined
   window.sessionStorage.removeItem(storageKey)
 }

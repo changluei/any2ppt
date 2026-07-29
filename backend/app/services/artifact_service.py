@@ -1,3 +1,10 @@
+"""课件制品的生成、校验、不可变版本、局部编辑与图片编排。
+
+这是编辑链路的事务核心。LessonArtifact 是“当前版本指针”，ArtifactVersion
+保存每次完整快照；所有写操作先校验 base_version_no，再创建新版本，绝不
+原地覆盖历史。工作台实时 Markdown、ReAct 修改和图片放置最终都汇入这里。
+"""
+
 import hashlib
 import json
 import uuid
@@ -19,6 +26,7 @@ ARTIFACT_TYPES = ("lesson_plan", "slide_deck", "speaker_notes", "exercise_set")
 
 
 def _layout_markdown(slide: dict, title: str, sections: list[str]) -> str:
+    """把普通章节内容映射到主题声明的命名 slot 语法。"""
     slots = [
         slot for slot in slide.get("layout_slots", ["default"])
         if slot not in {"note", "author", "footer", "caption"}
@@ -42,7 +50,7 @@ def _layout_markdown(slide: dict, title: str, sections: list[str]) -> str:
 
 
 def compose_ppt_artifact(artifacts: dict[str, dict], theme: dict | None = None) -> dict:
-    """Fold every teacher-facing deliverable into one slide-deck contract."""
+    """把教案、讲稿与练习对齐并折叠进最终课件，同时写入主题能力快照。"""
     deck = deepcopy(artifacts["slide_deck"])
     plan = artifacts["lesson_plan"]
     note_rows = artifacts["speaker_notes"].get("notes", [])
@@ -169,6 +177,7 @@ def compose_ppt_artifact(artifacts: dict[str, dict], theme: dict | None = None) 
 
 
 def artifact_out(artifact: LessonArtifact, version: ArtifactVersion) -> dict:
+    """构造 API 响应，并通过块哈希指出相对父版本未变化的内容。"""
     parent = next((item for item in artifact.versions if item.id == version.parent_version_id), None)
     previous_hashes = _block_hashes(parent.content) if parent else {}
     current_hashes = _block_hashes(version.content)
@@ -195,6 +204,7 @@ def artifact_out(artifact: LessonArtifact, version: ArtifactVersion) -> dict:
 
 
 def _block_hashes(content: dict) -> dict[str, str]:
+    """按稳定 ID 计算规范 JSON 哈希，用于验证局部修改边界。"""
     hashes: dict[str, str] = {}
     for collection in ("objectives", "stages", "assessments", "slides", "notes", "exercises"):
         for index, row in enumerate(content.get(collection, []) or []):
@@ -210,6 +220,7 @@ def _block_hashes(content: dict) -> dict[str, str]:
 
 
 def validate_artifact_content(artifact_type: str, content: dict) -> None:
+    """保证每类制品的核心集合非空且稳定 ID 唯一。"""
     required_collection = {
         "lesson_plan": "stages",
         "slide_deck": "slides",
@@ -231,6 +242,7 @@ def validate_artifact_content(artifact_type: str, content: dict) -> None:
 
 
 def save_version(db: Session, project_id: str, artifact_type: str, content: dict, citations: list, warnings: list, change_type="generated", changed_ids=None) -> LessonArtifact:
+    """在当前事务内锁定制品、追加快照并推进 current_version_no。"""
     validate_artifact_content(artifact_type, content)
     artifact = db.query(LessonArtifact).filter_by(project_id=project_id, type=artifact_type).with_for_update().first()
     if not artifact:
@@ -255,6 +267,7 @@ def save_version(db: Session, project_id: str, artifact_type: str, content: dict
 
 
 def run_generation_task(task_id: str) -> None:
+    """后台执行技能任务；full_lesson 会转交可恢复的 LangGraph 主链。"""
     db = SessionLocal()
     task = db.get(AITask, task_id)
     if not task or task.status == "cancelled":
@@ -400,6 +413,7 @@ def run_generation_task(task_id: str) -> None:
 
 
 def revise_artifact(db: Session, artifact: LessonArtifact, base_version_no: int, target_type: str, target_id: str, instruction: str, sync_related: bool = False) -> dict:
+    """执行传统局部修订，并用块哈希阻止模型越过目标边界。"""
     if artifact.current_version_no != base_version_no:
         raise RuntimeError(f"VERSION_CONFLICT:{artifact.current_version_no}")
     current = artifact.versions[-1]
@@ -431,7 +445,7 @@ def update_slide_markdown(
     slide_id: str,
     markdown: str,
 ) -> dict:
-    """Persist a teacher's direct Markdown edit as an immutable deck version."""
+    """把教师的 Markdown 直接编辑保存为不可变新版本。"""
     if artifact.type != "slide_deck":
         raise ValueError("只有课件支持 Markdown 源码编辑")
     if artifact.current_version_no != base_version_no:
@@ -487,7 +501,7 @@ def rewrite_slide_from_agent(
     layout: str = "",
     citations: list[dict] | None = None,
 ) -> dict:
-    """Apply one bounded ReAct action while preserving immutable versions and stable IDs."""
+    """应用一次受控 ReAct 重写，并同步对应讲稿而不改变稳定 ID。"""
     if artifact.type != "slide_deck":
         raise ValueError("只有课件支持 Agent 页面重写")
     if artifact.current_version_no != base_version_no:
@@ -607,6 +621,7 @@ def add_slide_image(
     position: str,
     caption: str,
 ) -> dict:
+    """把项目图片的布局引用加入页面，并创建 image_placement 版本。"""
     if artifact.type != "slide_deck":
         raise ValueError("只有课件支持添加图片")
     if artifact.project_id != image.project_id:
@@ -654,6 +669,7 @@ def remove_slide_image(
     base_version_no: int,
     placement_id: str,
 ) -> dict:
+    """按 placement_id 移除页面图片引用；原图片资产仍留在项目图片库。"""
     if artifact.type != "slide_deck":
         raise ValueError("只有课件支持移除图片")
     if artifact.current_version_no != base_version_no:

@@ -1,3 +1,9 @@
+"""面向生成流程的 RAG 检索封装。
+
+它将向量库原始行转换成 Citation，检测相互矛盾的片段，并把“无足够证据”
+作为显式状态返回，防止生成器把空检索误当成可靠资料。
+"""
+
 from __future__ import annotations
 
 import re
@@ -12,6 +18,7 @@ from .vector_store import ProjectVectorStore
 
 @dataclass(frozen=True)
 class EvidenceSet:
+    """检索片段、标准化引用、冲突提示和降级状态的集合。"""
     rows: list[dict]
     citations: list[Citation]
     sufficient: bool
@@ -20,6 +27,7 @@ class EvidenceSet:
 
 
 def _citations(rows: list[dict]) -> list[Citation]:
+    """将向量库行去重并转换为可暴露的引用结构。"""
     return [
         Citation(
             source_id=row["source_id"],
@@ -34,6 +42,7 @@ def _citations(rows: list[dict]) -> list[Citation]:
 
 
 def _detect_conflicts(rows: list[dict]) -> list[str]:
+    """对同一关键词附近的否定/数值差异做启发式冲突提示。"""
     """Detect only explicit numeric contradictions; uncertain cases stay warnings."""
     claims: dict[str, set[str]] = {}
     patterns = [
@@ -56,6 +65,7 @@ def retrieve_evidence(
     top_k: int | None = None,
     min_score: float | None = None,
 ) -> EvidenceSet:
+    """检索所选项目资料/知识库，并施加最低相关度阈值。"""
     settings = get_settings()
     vector_store = store or ProjectVectorStore()
     library_ids = list(context.selected_knowledge_base_ids)

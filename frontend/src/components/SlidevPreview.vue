@@ -1,4 +1,10 @@
 <script setup lang="ts">
+/**
+ * 工作台实时预览。
+ *
+ * Markdown 在浏览器内转为经 DOMPurify 清洗的 HTML，并叠加 palette 和图片
+ * 位置。键入时优先展示本地即时结果，稳定版本才使用真实 Slidev 预览图。
+ */
 import { computed, onUnmounted, ref, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import MarkdownIt from 'markdown-it'
@@ -47,6 +53,7 @@ function placementHtml(placement: SlideImagePlacement) {
   return image + `<div style="position:absolute;left:${placement.x}%;top:${Math.min(94, placement.y + placement.height + 1)}%;width:${placement.width}%;text-align:center;font-size:12px;opacity:.75;z-index:4">${caption}</div>`
 }
 const srcdoc = computed(() => {
+  // iframe 与主应用隔离；所有 Markdown HTML 先净化，再注入主题 CSS 变量。
   const rendered = DOMPurify.sanitize(parser.render(draft.value || ''))
   const title = DOMPurify.sanitize(props.title || '课件预览')
   const backgrounds = props.images.filter((item) => item.position === 'background').map(placementHtml).join('')
@@ -65,6 +72,7 @@ const srcdoc = computed(() => {
 })
 
 watch(() => props.markdown, (value, previous) => {
+  // 草稿仍对应旧值时才接收新版本，保护用户正在输入的内容。
   if (shouldSyncMarkdownDraft(draft.value, previous, value)) draft.value = value
 })
 watch(() => props.renderedPreviewUrl, (url) => {
@@ -95,6 +103,7 @@ watch(() => props.renderedPreviewUrl, (url) => {
 }, { immediate: true })
 
 function updateDraft(event: Event) {
+  // 立即向父页面发出草稿，父页面负责防抖持久化。
   draft.value = (event.target as HTMLTextAreaElement).value
   emit('change', draft.value)
 }

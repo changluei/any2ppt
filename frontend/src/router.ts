@@ -1,3 +1,9 @@
+/**
+ * 页面路由与生成期全局导航锁。
+ *
+ * 只要 generationSession 仍处于活动状态，任何导航都会被重定向到锁定生成页，
+ * 防止用户切换导航后丢失轮询与生成上下文。
+ */
 import { createRouter, createWebHistory } from 'vue-router'
 import { hasActiveGeneration } from './services/generationSession'
 const routes = [
@@ -10,6 +16,7 @@ const routes = [
 ]
 const router=createRouter({history:createWebHistory(),routes})
 router.beforeEach(to => {
+  // 生成完成/失败后 GenerationPage 会先清理 session，导航才能恢复。
   if (hasActiveGeneration() && to.path !== '/generating') return '/generating'
 })
 router.afterEach(to=>document.title=`${String(to.meta.title||'Any2PPT')} · Any2PPT`)

@@ -1,3 +1,10 @@
+"""把 RAG 证据与教学技能结果生成成版本化课件内容。
+
+主链分为：生成教学蓝图 → 生成页面叙事与练习 → 根据主题布局能力规范化 →
+物化 slide_deck、lesson_plan、speaker_notes、exercise_set。DeepSeek 不可用
+时采用确定性 fallback，保证结构可用，同时显式标记降级供教师复核。
+"""
+
 from __future__ import annotations
 
 import json
@@ -30,10 +37,12 @@ from .vector_store import ProjectVectorStore
 
 
 class LocalRevisionOutput(BaseModel):
+    """局部修订模型必须返回的最小结构。"""
     changed_block: dict[str, Any]
 
 
 def _dedupe_citations(citations: list[Citation]) -> list[Citation]:
+    """按资料与 chunk 去重，并保持最后一次标准化结果。"""
     unique: dict[tuple[str, str], Citation] = {}
     for citation in citations:
         unique[(citation.source_id, citation.chunk_id)] = citation
@@ -66,6 +75,7 @@ def _semantic_layout(
     *,
     stage_transition: bool = False,
 ) -> str:
+    """根据页面语义从主题真实布局中选取一项，避免模板被选中却未使用。"""
     if index == 1:
         return _matching_layout(layouts, ["cover", "intro", "lead"]) or layouts[0]
     if stage_transition:
@@ -95,6 +105,7 @@ def _semantic_layout(
 
 
 def _fallback_outlines(context: LessonContext) -> list[SlideOutline]:
+    """模型不可用时生成覆盖完整教学节奏的基础提纲。"""
     titles = [
         "课题与学习任务", "情境问题", "说说已有经验", "本课学习目标", "观察资料",
         "发现关键信息", "合作探究", "交流与质疑", "方法梳理", "例题示范",
@@ -137,6 +148,7 @@ def _normalize_outlines(
     objective_ids: set[str],
     stage_ids: set[str],
 ) -> list[SlideOutline]:
+    """修复页数、目标关联、布局和 slot，使模型输出可以安全渲染。"""
     normalized = list(outlines[:18])
     fallback = _fallback_outlines(context)
     while len(normalized) < 12:
@@ -354,6 +366,7 @@ def _materialize_artifacts(
     outlines: list[SlideOutline],
     exercises: list[Exercise],
 ) -> dict[str, dict[str, Any]]:
+    """把统一蓝图物化为四类相互对齐的制品 JSON。"""
     objective_ids = {item.id for item in blueprint.objectives}
     outlines = _normalize_outlines(context, outlines, objective_ids, {item.id for item in blueprint.activities})
     source_slides = set(range(5, min(9, len(outlines) + 1)))
@@ -566,6 +579,7 @@ def build_lesson_blueprint(
     store: ProjectVectorStore | None = None,
     trace_id: str | None = None,
 ) -> tuple[LessonBlueprint, list[SlideOutline], list[Exercise], list, bool]:
+    """依次汇合蓝图、页面和练习技能，并返回是否发生降级。"""
     vector_store = store or ProjectVectorStore()
     run_trace = trace_id or str(uuid.uuid4())
     blueprint, responses = design_lesson_blueprint(
@@ -602,6 +616,7 @@ def generate_lesson_bundle(
     store: ProjectVectorStore | None = None,
     trace_id: str | None = None,
 ) -> GenerationBundle:
+    """执行完整生成，补充 trace、引用和降级告警。"""
     started = time.perf_counter()
     run_trace = trace_id or str(uuid.uuid4())
     blueprint, outlines, exercises, responses, degraded = build_lesson_blueprint(
@@ -637,6 +652,7 @@ def generate_lesson_bundle(
 
 
 def _rule_revision(block: dict[str, Any], target_type: str, instruction: str) -> dict[str, Any]:
+    """模型不可用时按常见中文指令执行最小、可预测的修订。"""
     revised = deepcopy(block)
     clean_instruction = instruction.strip()
     if target_type == "slide":
@@ -670,6 +686,7 @@ def revise_block(
     llm=None,
     citations: list[dict] | None = None,
 ) -> tuple[dict, list[str]]:
+    """只修改目标稳定 ID 对应的块；失败时使用规则 fallback。"""
     updated = json.loads(json.dumps(content, ensure_ascii=False))
     collections = {"slide": "slides", "note": "notes", "exercise": "exercises"}
     key = collections.get(target_type, target_type)

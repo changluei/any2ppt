@@ -1,3 +1,10 @@
+"""文本向量化适配层。
+
+默认 hash provider 无需外部服务，适合离线演示和可重复测试；配置兼容接口
+后可切换真实 embedding 服务。检索和入库必须使用相同 provider、维度与
+模型版本，否则旧向量需要重新构建。
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -11,6 +18,7 @@ from .exceptions import AIConfigurationError, AINetworkError
 
 
 def tokenize_zh(text: str) -> list[str]:
+    """用字符 n-gram 与英文单词组成轻量中英文 token 序列。"""
     """Small deterministic tokenizer that works offline for Chinese teaching text."""
     normalized = re.sub(r"\s+", "", text.lower())
     chinese_runs = re.findall(r"[\u4e00-\u9fff]+", normalized)
@@ -23,6 +31,7 @@ def tokenize_zh(text: str) -> list[str]:
 
 
 class EmbeddingProvider(Protocol):
+    """向量提供方的最小接口，供入库和查询共同依赖。"""
     name: str
     dimensions: int
 
@@ -32,6 +41,7 @@ class EmbeddingProvider(Protocol):
 
 
 class HashEmbeddingProvider:
+    """把 token 哈希投影到固定维度并归一化的确定性本地向量。"""
     """Lightweight, reproducible fallback; no model download and no network call."""
 
     name = "hash-zh-v1"
@@ -59,6 +69,7 @@ class HashEmbeddingProvider:
 
 
 class OpenAICompatibleEmbeddingProvider:
+    """调用 OpenAI 兼容 embeddings endpoint 的可选实现。"""
     """Optional remote embedding adapter for an explicitly configured provider."""
 
     def __init__(self, *, api_key: str, base_url: str, model: str, dimensions: int):
@@ -82,6 +93,7 @@ class OpenAICompatibleEmbeddingProvider:
 
 
 def create_embedding_provider() -> EmbeddingProvider:
+    """根据配置构造 provider；未知配置直接失败，避免静默混用向量。"""
     settings = get_settings()
     if settings.embedding_provider.lower() in {"hash", "local_hash"}:
         return HashEmbeddingProvider(settings.embedding_dimensions)

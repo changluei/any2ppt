@@ -1,3 +1,9 @@
+"""校验并恢复 export_knowledge_bundle.py 生成的知识库归档。
+
+恢复前校验 SHA-256、manifest 和 tar 成员路径；数据库与目录先暂存后替换，
+尽量避免失败时破坏现有知识库。应在应用停止写入时执行。
+"""
+
 from __future__ import annotations
 
 import argparse

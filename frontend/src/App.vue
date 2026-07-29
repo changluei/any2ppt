@@ -1,4 +1,8 @@
 <script setup lang="ts">
+/**
+ * 常规页面的站点框架与主导航。
+ * 生成锁定页和工作台需要完整视口，因此通过 route meta 绕过导航外壳。
+ */
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 

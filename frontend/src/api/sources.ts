@@ -1,3 +1,7 @@
+/**
+ * 项目级资料兼容 API。
+ * 新上传仍会由后端归档到 personal，这里保留 projectId 方便生成向导追踪文件。
+ */
 import { http, listData, objectData } from './http'
 import type { SearchResult, Source } from '../types'
 

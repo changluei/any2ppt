@@ -1,3 +1,10 @@
+"""工作台课件编辑 ReAct Agent 的纯编排核心。
+
+Agent 本身不访问数据库或文件系统，而是通过 EditorToolbox 协议调用受控工具；
+这让推理循环可以单测，也把“模型能做什么”限制在白名单内。循环设步骤、
+修改次数与重复调用上限，避免模型失控、重复改页或无限消耗 API。
+"""
+
 from __future__ import annotations
 
 import json
@@ -28,6 +35,7 @@ MAX_MUTATIONS = 3
 
 
 class ReActDecision(BaseModel):
+    """模型每一步必须返回的结构化动作；只有 finish 可携带最终回复。"""
     action: AgentAction
     arguments: dict[str, Any] = Field(default_factory=dict)
     response: str = Field(
@@ -37,11 +45,13 @@ class ReActDecision(BaseModel):
 
 
 class EditorToolbox(Protocol):
+    """由 service 层实现的受控工具边界。"""
     def execute(self, action: AgentAction, arguments: dict[str, Any]) -> dict[str, Any]: ...
 
 
 @dataclass
 class EditorAgentResult:
+    """一次对话执行的回复、动作轨迹和模型信息。"""
     response: str
     trace_id: str
     actions: list[str] = field(default_factory=list)
@@ -84,6 +94,7 @@ SYSTEM_PROMPT = """
 
 
 def _compact(value: Any, limit: int = 12000) -> str:
+    """压缩 observation 上下文，防止整套课件无限撑大 prompt。"""
     text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     return text if len(text) <= limit else f"{text[:limit]}…"
 
@@ -150,6 +161,7 @@ def status_agent_response(
     history: list[dict[str, Any]],
     model_response: str,
 ) -> str:
+    """对“刚才改好了吗”类问题，从持久历史生成事实性回答。"""
     if not re.search(r"解决了吗|改好了吗|完成了吗|弄好了吗|刚才做了什么|刚才改了什么", user_message):
         return model_response
     previous = next(
@@ -190,6 +202,11 @@ def run_editor_react_agent(
     llm=None,
     trace_id: str | None = None,
 ) -> EditorAgentResult:
+    """执行一次有界 ReAct 循环，直到模型 finish 或达到步骤上限。
+
+    工具错误也作为 observation 回传，让模型有机会修正参数。成功变更后的
+    回复会由本地 observation 重写，不采信模型泛化的“已完成”措辞。
+    """
     client = llm or DeepSeekClient()
     run_trace = trace_id or str(uuid.uuid4())
     observations: list[dict[str, Any]] = []
@@ -198,6 +215,7 @@ def run_editor_react_agent(
     model_name = ""
     repeated_calls: dict[str, int] = {}
 
+    # 每一步只选择一个工具；下一步必须看到这一步的 observation。
     for step in range(1, MAX_AGENT_STEPS + 1):
         state = {
             "project": project_context,
@@ -233,6 +251,7 @@ def run_editor_react_agent(
                 response = status_agent_response(user_message, history, response)
             return EditorAgentResult(response, run_trace, actions, observations, model_name)
 
+        # 同参数调用超过两次通常代表陷入循环，失败观察会迫使模型换路。
         signature = f"{action}:{_compact(decision.arguments, 3000)}"
         repeated_calls[signature] = repeated_calls.get(signature, 0) + 1
         if repeated_calls[signature] > 2:
@@ -245,6 +264,7 @@ def run_editor_react_agent(
             )
             continue
 
+        # 读取/校验可多次执行，但真正修改单轮最多三次。
         if action in MUTATING_ACTIONS:
             if mutation_count >= MAX_MUTATIONS:
                 observations.append(
@@ -265,6 +285,7 @@ def run_editor_react_agent(
             event = {"action": action, "ok": False, "error": str(exc)[:800]}
         observations.append(event)
 
+    # 达到硬上限时仍返回诚实结果，不伪造尚未发生的修改。
     successful_mutations = [
         item["action"]
         for item in observations

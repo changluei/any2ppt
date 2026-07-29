@@ -1,3 +1,10 @@
+"""可独立调用的教学生成技能与意图路由。
+
+每个 TeachingSkill 负责一个结构化教学子任务，共享 RAG、DeepSeek 调用和
+确定性 fallback 框架。generation.py 组合这些技能，registry() 对外公开
+稳定的能力清单。
+"""
+
 from __future__ import annotations
 
 import time
@@ -75,6 +82,7 @@ class SkillInfo:
 
 
 class TeachingSkill:
+    """技能模板：准备证据、调用模型、校验输出并在必要时降级。"""
     info: ClassVar[SkillInfo]
     output_model: ClassVar[type[BaseModel]]
     query_template: ClassVar[str]
@@ -319,6 +327,7 @@ _INSTANCES = {skill.info.id: skill() for skill in SKILL_CLASSES}
 
 
 def registry() -> list[dict[str, Any]]:
+    """返回不含实现细节的技能元数据。"""
     return [
         {
             "id": item.info.id,
@@ -333,6 +342,7 @@ def registry() -> list[dict[str, Any]]:
 
 
 def get_skill(skill_id: str) -> TeachingSkill:
+    """按稳定 ID 获取技能；未知 ID 明确报错。"""
     try:
         return _INSTANCES[skill_id]
     except KeyError as exc:
@@ -340,6 +350,7 @@ def get_skill(skill_id: str) -> TeachingSkill:
 
 
 def run_skill(skill_id: str, request: SkillRequest, **kwargs) -> SkillResponse:
+    """运行单个技能并返回统一 SkillResponse。"""
     return get_skill(skill_id).run(request, **kwargs)
 
 
@@ -353,6 +364,7 @@ _INTENT_RULES = {
 
 
 def route_intent(text: str, explicit_task_type: str | None = None) -> str | None:
+    """把中文意图路由到技能 ID，显式 task_type 优先。"""
     if explicit_task_type is not None:
         return explicit_task_type if explicit_task_type in _INSTANCES else None
     scores = {

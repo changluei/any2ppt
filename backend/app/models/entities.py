@@ -1,3 +1,10 @@
+"""关系数据库实体定义。
+
+MySQL 保存业务事实和版本元数据，真正的向量与文本片段由 Chroma 保存。
+这里的外键和唯一约束同时承担并发保护：例如同一项目同一制品类型只能有
+一条 LessonArtifact，但它可以拥有多个不可变 ArtifactVersion。
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -11,15 +18,18 @@ from app.core.database import Base
 
 
 def uid() -> str:
+    """生成可跨数据库使用的 UUID 字符串主键。"""
     return str(uuid.uuid4())
 
 
 class TimestampMixin:
+    """为可变业务实体提供统一的创建/更新时间。"""
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
 class Project(Base, TimestampMixin):
+    """一次 PPT 生成/编辑工作的根聚合，关联资料、任务、制品和导出。"""
     __tablename__ = "projects"
     __table_args__ = (Index("ix_projects_status_updated", "status", "updated_at"),)
 
@@ -47,6 +57,7 @@ class Project(Base, TimestampMixin):
 
 
 class KnowledgeBase(Base, TimestampMixin):
+    """知识库目录；官方三库只读，personal 库由用户上传持续丰富。"""
     __tablename__ = "knowledge_bases"
     __table_args__ = (
         Index("ix_knowledge_base_kind", "kind"),
@@ -69,6 +80,7 @@ class KnowledgeBase(Base, TimestampMixin):
 
 
 class SourceDocument(Base, TimestampMixin):
+    """上传资料的文件元数据；解析后的 chunks 不存 MySQL，而存向量库。"""
     __tablename__ = "source_documents"
     __table_args__ = (
         UniqueConstraint("knowledge_base_id", "sha256", name="uq_knowledge_base_source_hash"),
@@ -98,6 +110,7 @@ class SourceDocument(Base, TimestampMixin):
 
 
 class ProjectImage(Base, TimestampMixin):
+    """项目图片资产；保存尺寸便于生成 Slidev 定位代码，不做图片语义识别。"""
     __tablename__ = "project_images"
     __table_args__ = (
         UniqueConstraint("project_id", "sha256", name="uq_project_image_hash"),
@@ -117,6 +130,7 @@ class ProjectImage(Base, TimestampMixin):
 
 
 class EditorAgentMessage(Base):
+    """工作台 ReAct 对话历史，包含工具轨迹和对应的制品版本号。"""
     __tablename__ = "editor_agent_messages"
     __table_args__ = (
         Index("ix_editor_agent_project_created", "project_id", "created_at"),
@@ -143,6 +157,7 @@ class EditorAgentMessage(Base):
 
 
 class AITask(Base, TimestampMixin):
+    """可重试、可取消的长耗时 AI 任务及其输入/结果快照。"""
     __tablename__ = "ai_tasks"
     __table_args__ = (
         UniqueConstraint("project_id", "idempotency_key", name="uq_task_idempotency"),
@@ -168,6 +183,7 @@ class AITask(Base, TimestampMixin):
 
 
 class LessonArtifact(Base, TimestampMixin):
+    """课件、教案或习题等逻辑制品的版本指针。"""
     __tablename__ = "lesson_artifacts"
     __table_args__ = (
         UniqueConstraint("project_id", "type", name="uq_project_artifact_type"),
@@ -187,6 +203,7 @@ class LessonArtifact(Base, TimestampMixin):
 
 
 class ArtifactVersion(Base):
+    """不可变的制品快照；父版本与 changed_ids 支持审计和回滚。"""
     __tablename__ = "artifact_versions"
     __table_args__ = (
         UniqueConstraint("artifact_id", "version_no", name="uq_artifact_version"),
@@ -210,6 +227,7 @@ class ArtifactVersion(Base):
 
 
 class GraphRun(Base, TimestampMixin):
+    """一次 LangGraph 生成运行的节点进度、检查点和人工确认状态。"""
     __tablename__ = "graph_runs"
     __table_args__ = (
         Index("ix_graph_project_status", "project_id", "status"),
@@ -233,6 +251,7 @@ class GraphRun(Base, TimestampMixin):
 
 
 class ExportJob(Base, TimestampMixin):
+    """异步导出作业，记录所选制品版本与最终文件位置。"""
     __tablename__ = "export_jobs"
     __table_args__ = (Index("ix_export_project_status", "project_id", "status"),)
 

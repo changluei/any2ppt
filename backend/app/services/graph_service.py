@@ -1,3 +1,10 @@
+"""LangGraph 生成节点的业务实现、检查点持久化与任务状态同步。
+
+ai/graph.py 只定义状态和路由，本模块负责真正调用 RAG/技能、物化四类制品、
+执行质量返工，并把每个安全节点后的 state 写入 GraphRun。任何状态更新都会
+同步 AITask，生成锁定页因此可以轮询同一条可靠进度链。
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -38,10 +45,12 @@ NODE_PROGRESS = {
 
 
 def _json_copy(value: Any) -> Any:
+    """通过 JSON 往返生成可持久化深拷贝，剥离 ORM/Pydantic 引用。"""
     return json.loads(json.dumps(value, ensure_ascii=False, default=str))
 
 
 def _context_for(project: Project, task: AITask) -> LessonContext:
+    """从项目和任务输入快照重建本次生成的冻结课程上下文。"""
     snapshot = task.input_snapshot or {}
     base = LessonContext(
         project_id=project.id,
@@ -78,6 +87,7 @@ def _context_for(project: Project, task: AITask) -> LessonContext:
 
 
 def _initial_graph_state(project: Project, task: AITask, thread_id: str | None = None) -> dict[str, Any]:
+    """构造新运行的完整状态，包含主题能力和用户选择。"""
     return {
         "project": {
             "id": project.id,
@@ -111,6 +121,7 @@ def _initial_graph_state(project: Project, task: AITask, thread_id: str | None =
 
 
 class GraphRunCheckpointStore:
+    """将 LangGraph checkpoint 读写映射到 MySQL GraphRun.state_snapshot。"""
     """Persist complete LangGraph checkpoints in the existing GraphRun table."""
 
     def __init__(self, graph_id: str):
@@ -199,6 +210,7 @@ def create_graph_run(
     thread_id: str | None = None,
     checkpoint_ref: str | None = None,
 ) -> GraphRun:
+    """为任务幂等创建 GraphRun，或返回已有运行。"""
     state = _initial_graph_state(project, task, thread_id)
     graph = GraphRun(
         project_id=project.id,
@@ -220,6 +232,7 @@ def create_graph_run(
 
 
 def _merge_citations(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """按 source/chunk 合并节点产出的引用。"""
     merged: dict[tuple[str, str], dict[str, Any]] = {}
     for rows in groups:
         for row in rows:
@@ -229,6 +242,7 @@ def _merge_citations(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _skill_state_delta(state: dict[str, Any], responses: list[SkillResponse]) -> dict[str, Any]:
+    """从技能响应汇总引用、告警和是否降级。"""
     traces = list(state.get("skill_traces", []))
     traces.extend(response.trace.model_dump(mode="json") for response in responses)
     models = [item["model"] for item in traces if item.get("model") != "rule-based-fallback"]
@@ -243,6 +257,7 @@ def _skill_state_delta(state: dict[str, Any], responses: list[SkillResponse]) ->
 
 
 def _graph_handlers(store: ProjectVectorStore) -> dict[str, Any]:
+    """创建闭包节点表，让所有节点共享同一个向量库连接。"""
     def context(state: dict[str, Any]) -> LessonContext:
         return LessonContext.model_validate(state["context"])
 
@@ -383,11 +398,13 @@ def _graph_handlers(store: ProjectVectorStore) -> dict[str, Any]:
 
 
 def _artifact_hash(artifacts: dict[str, dict[str, Any]]) -> str:
+    """计算完整制品包摘要，用于判断返工是否产生真实变化。"""
     payload = json.dumps(artifacts, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _persist_graph_result(graph_id: str, state: dict[str, Any]) -> dict[str, Any]:
+    """事务保存最终制品版本，并同步 GraphRun、AITask 和 Project 状态。"""
     from app.services.artifact_service import compose_ppt_artifact, save_version
     artifacts = state.get("artifacts", {})
     with SessionLocal() as db:
@@ -483,6 +500,7 @@ def execute_graph_run(
     human_decision: str | None = None,
     reset_failure: bool = False,
 ) -> dict[str, Any] | None:
+    """从当前检查点运行图，逐事件更新进度，结束后持久化结果。"""
     checkpoint = GraphRunCheckpointStore(graph_id)
     with SessionLocal() as db:
         graph = db.get(GraphRun, graph_id)
@@ -530,6 +548,7 @@ def execute_graph_run(
 
 
 def start_task_graph(task_id: str) -> None:
+    """full_lesson 后台任务入口：创建图并执行。"""
     graph_id: str | None = None
     try:
         with SessionLocal() as db:
@@ -568,10 +587,12 @@ def start_task_graph(task_id: str) -> None:
 
 
 def resume_graph_run(graph_id: str, *, resume_from: str | None = None) -> dict[str, Any] | None:
+    """从指定或已保存节点继续运行。"""
     return execute_graph_run(graph_id, resume_from=resume_from, reset_failure=True)
 
 
 def decide_graph(graph_id: str, decision: str) -> dict[str, Any] | None:
+    """保存人工决定，并在 accept/revise 时继续图执行。"""
     return execute_graph_run(
         graph_id,
         resume_from="human_confirm",

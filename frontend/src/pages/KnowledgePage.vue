@@ -1,4 +1,8 @@
 <script setup lang="ts">
+/**
+ * 知识库管理页：查看三科官方库统计，并持续维护个人知识库。
+ * 官方库只读；个人资料支持上传、状态轮询、失败重试和删除。
+ */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { Collection, Delete, Document, RefreshRight, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'

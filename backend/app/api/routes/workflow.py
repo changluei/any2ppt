@@ -1,3 +1,9 @@
+"""LangGraph 运行控制、人工确认和课件导出 API。
+
+AITask 面向用户进度与幂等性，GraphRun 记录节点级状态与检查点；导出则采用
+独立作业，避免 PPTX/Slidev 渲染长期占用 HTTP 连接。
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -30,6 +36,7 @@ def resolve_export_versions(
     package_type: str,
     version_ids: list[str],
 ) -> dict[str, str]:
+    """解析显式版本选择；未指定时使用各制品当前版本。"""
     selected: dict[str, ArtifactVersion] = {}
     unique_version_ids = list(dict.fromkeys(version_ids))
     if unique_version_ids:
@@ -79,6 +86,7 @@ def resolve_export_versions(
 
 
 def graph_payload(graph: GraphRun) -> dict:
+    """把 ORM GraphRun 转成稳定的前端进度结构。"""
     return {
         "id": graph.id,
         "project_id": graph.project_id,
@@ -98,6 +106,7 @@ def graph_payload(graph: GraphRun) -> dict:
 
 
 def graph_or_404(db: Session, graph_id: str) -> GraphRun:
+    """读取图运行并统一处理不存在错误。"""
     graph = db.get(GraphRun, graph_id)
     if not graph:
         raise HTTPException(404, detail={"code": "GRAPH_NOT_FOUND", "message": "流程不存在"})
@@ -111,6 +120,7 @@ def start_graph(
     background: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
+    """创建或恢复 GraphRun，并在后台开始节点执行。"""
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(404, detail={"code": "PROJECT_NOT_FOUND", "message": "项目不存在"})
@@ -139,6 +149,7 @@ def start_graph(
 
 @router.get("/projects/{project_id}/graph")
 def get_graph(project_id: str, db: Session = Depends(get_db)):
+    """返回项目最近一次生成图，供页面刷新后恢复。"""
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(404, detail={"code": "PROJECT_NOT_FOUND", "message": "项目不存在"})
@@ -150,6 +161,7 @@ def get_graph(project_id: str, db: Session = Depends(get_db)):
 
 @router.post("/graphs/{graph_id}/cancel")
 def cancel_graph(graph_id: str, db: Session = Depends(get_db)):
+    """取消尚未结束的图运行。"""
     graph = graph_or_404(db, graph_id)
     if graph.status in {"succeeded", "failed"}:
         return graph_payload(graph)
@@ -171,6 +183,7 @@ def cancel_graph(graph_id: str, db: Session = Depends(get_db)):
 
 @router.post("/graphs/{graph_id}/resume", response_model=GraphRunOut)
 def resume_graph(graph_id: str, background: BackgroundTasks, db: Session = Depends(get_db)):
+    """从持久化状态继续暂停或异常中断的图。"""
     graph = graph_or_404(db, graph_id)
     if graph.status not in {"cancelled", "failed", "needs_revision", "awaiting_confirmation"}:
         raise HTTPException(409, detail={"code": "GRAPH_CONFLICT", "message": "当前流程不需要恢复"})
@@ -202,6 +215,7 @@ def resume_graph(graph_id: str, background: BackgroundTasks, db: Session = Depen
 
 @router.post("/graphs/{graph_id}/confirm")
 def confirm_graph(graph_id: str, data: HumanDecision, db: Session = Depends(get_db)):
+    """写入人工决定，并由图路由选择结束、返工或取消。"""
     graph = graph_or_404(db, graph_id)
     if graph.human_decision == data.decision and graph.status in {"succeeded", "cancelled"}:
         return graph_payload(graph)
@@ -223,6 +237,7 @@ def confirm_graph(graph_id: str, data: HumanDecision, db: Session = Depends(get_
 
 @router.post("/projects/{project_id}/exports", status_code=202)
 def export_project(project_id: str, data: ExportCreate, background: BackgroundTasks, db: Session = Depends(get_db)):
+    """创建导出作业并异步生成 PPTX 或教学包。"""
     if not db.get(Project, project_id):
         raise HTTPException(404, detail={"code": "PROJECT_NOT_FOUND", "message": "项目不存在"})
     graph = db.query(GraphRun).filter_by(project_id=project_id, status="succeeded").first()
@@ -243,6 +258,7 @@ def export_project(project_id: str, data: ExportCreate, background: BackgroundTa
 
 @router.get("/exports/{job_id}")
 def export_status(job_id: str, db: Session = Depends(get_db)):
+    """返回导出进度和下载可用性。"""
     job = db.get(ExportJob, job_id)
     if not job:
         raise HTTPException(404, detail={"code": "EXPORT_NOT_FOUND", "message": "导出任务不存在"})
@@ -259,6 +275,7 @@ def export_status(job_id: str, db: Session = Depends(get_db)):
 
 @router.get("/exports/{job_id}/download")
 def download_export(job_id: str, project_id: str | None = None, db: Session = Depends(get_db)):
+    """仅允许下载已完成且文件仍存在的导出结果。"""
     job = db.get(ExportJob, job_id)
     if not job or job.status != "succeeded" or not job.file_path:
         raise HTTPException(404, detail={"code": "EXPORT_NOT_READY", "message": "导出文件尚不可用"})

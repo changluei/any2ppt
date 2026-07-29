@@ -1,3 +1,10 @@
+"""AI 层内部的强类型数据结构。
+
+这些模型把“模型可能输出的自由文本”收敛成可验证的课程目标、教学活动、
+幻灯片、讲稿与练习结构。它们不是 HTTP schema；API 层会把最终 bundle
+进一步包装为版本化 Artifact。
+"""
+
 from __future__ import annotations
 
 from typing import Any, Literal
@@ -6,6 +13,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class Citation(BaseModel):
+    """可回溯到资料文件、位置和 chunk 的引用。"""
     source_id: str = Field(min_length=1)
     chunk_id: str = Field(min_length=1)
     filename: str = Field(min_length=1)
@@ -15,12 +23,14 @@ class Citation(BaseModel):
 
 
 class RetrievalHit(Citation):
+    """附带检索得分与原始内容的内部命中项。"""
     content: str = Field(min_length=1)
     project_id: str = Field(min_length=1)
     content_hash: str = ""
 
 
 class ThemeLayoutCapability(BaseModel):
+    """一个主题布局的名称、用途、slot 与使用提示。"""
     name: str = Field(min_length=1)
     slots: list[str] = Field(default_factory=lambda: ["default"])
     props: list[str] = Field(default_factory=list)
@@ -31,6 +41,7 @@ class ThemeLayoutCapability(BaseModel):
 
 
 class LessonContext(BaseModel):
+    """贯穿所有教学技能的课程背景与用户要求。"""
     project_id: str = Field(min_length=1)
     subject: str = Field(min_length=1)
     grade: str = Field(min_length=1)
@@ -52,6 +63,7 @@ class LessonContext(BaseModel):
 
 
 class TraceInfo(BaseModel):
+    """一次 AI 调用的可观测信息。"""
     trace_id: str
     skill_id: str | None = None
     model: str
@@ -63,6 +75,7 @@ class TraceInfo(BaseModel):
 
 
 class Objective(BaseModel):
+    """可测量的单条学习目标。"""
     id: str
     behavior: str
     condition: str
@@ -71,6 +84,7 @@ class Objective(BaseModel):
 
 
 class Activity(BaseModel):
+    """教学环节、时间分配和师生活动。"""
     id: str
     name: str
     time_minutes: int = Field(ge=1, le=120)
@@ -81,6 +95,7 @@ class Activity(BaseModel):
 
 
 class Assessment(BaseModel):
+    """与目标绑定的形成性或总结性评价。"""
     id: str
     method: str
     objective_ids: list[str] = Field(min_length=1)
@@ -88,6 +103,7 @@ class Assessment(BaseModel):
 
 
 class LessonBlueprint(BaseModel):
+    """生成幻灯片前的整课蓝图，是多技能结果的汇合点。"""
     title: str
     grade: str
     subject: str
@@ -121,6 +137,7 @@ class LessonBlueprint(BaseModel):
 
 
 class Slide(BaseModel):
+    """一页可渲染 Slidev 幻灯片及其稳定 slide_id。"""
     slide_id: str
     order: int = Field(ge=1)
     title: str
@@ -135,6 +152,7 @@ class Slide(BaseModel):
 
 
 class SpeakerNote(BaseModel):
+    """与 slide_id 对齐的教师讲稿。"""
     slide_id: str
     explanation: str
     questions: list[str] = Field(default_factory=list)
@@ -145,6 +163,7 @@ class SpeakerNote(BaseModel):
 
 
 class Exercise(BaseModel):
+    """与知识点/目标绑定的练习题与答案。"""
     exercise_id: str
     level: Literal["基础", "巩固", "提高"]
     objective_ids: list[str] = Field(min_length=1)
@@ -159,6 +178,7 @@ class Exercise(BaseModel):
 
 
 class GenerationBundle(BaseModel):
+    """一次完整生成的所有结构化产物。"""
     artifacts: dict[str, dict[str, Any]]
     citations: list[Citation] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
@@ -176,12 +196,14 @@ class GenerationBundle(BaseModel):
 
 
 class SkillRequest(BaseModel):
+    """单个教学技能运行时的统一输入。"""
     context: LessonContext
     instruction: str = ""
     parameters: dict[str, Any] = Field(default_factory=dict)
 
 
 class SkillResponse(BaseModel):
+    """技能输出、引用、告警和 trace 的统一信封。"""
     skill_id: str
     result: dict[str, Any]
     citations: list[Citation] = Field(default_factory=list)

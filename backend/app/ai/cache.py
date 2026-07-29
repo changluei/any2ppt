@@ -1,3 +1,10 @@
+"""生成结果的进程内短期缓存。
+
+缓存键包含项目、提示词版本、资料/知识库选择和输入内容摘要，避免相同请求
+重复消耗模型额度。它不是业务事实来源：进程重启后可安全丢失，正式结果仍
+必须写入 ArtifactVersion。
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -16,6 +23,7 @@ def build_cache_key(
     prompt_version: str,
     payload: dict[str, Any],
 ) -> str:
+    """对会影响生成结果的全部输入做稳定序列化与 SHA-256 摘要。"""
     namespace = {
         "project_id": project_id,
         "input_version": input_version,
@@ -29,6 +37,7 @@ def build_cache_key(
 
 @dataclass(frozen=True)
 class CacheHit:
+    """缓存命中结果及首次写入时间。"""
     key: str
     value: dict[str, Any]
     created_at: str
@@ -36,6 +45,7 @@ class CacheHit:
 
 
 class GenerationCache:
+    """线程安全需求较低的单进程字典缓存，按项目支持整体失效。"""
     """Process-local cache. Callers must display CacheHit.cached instead of claiming a new model run."""
 
     def __init__(self):

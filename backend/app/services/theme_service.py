@@ -1,3 +1,9 @@
+"""Slidev 主题目录、能力解析、选择、下载缓存与项目绑定。
+
+首页读取目录不会下载包；用户选中主题后才调用 renderer 安装并缓存。
+capabilities 会进入生成 prompt，避免 AI 只使用 default 布局。
+"""
+
 from __future__ import annotations
 
 import json
@@ -17,10 +23,12 @@ CATALOG_PATH = Path(__file__).resolve().parents[1] / "theme_catalog.json"
 
 @lru_cache(maxsize=1)
 def theme_catalog() -> list[dict[str, Any]]:
+    """读取静态主题目录；缓存避免每次请求重复读盘。"""
     return json.loads(CATALOG_PATH.read_text("utf-8"))
 
 
 def public_themes() -> list[dict[str, Any]]:
+    """返回可安全暴露给首页的主题列表。"""
     return [
         {key: value for key, value in item.items() if key != "match_terms"}
         for item in theme_catalog()
@@ -28,10 +36,12 @@ def public_themes() -> list[dict[str, Any]]:
 
 
 def get_theme(theme_id: str) -> dict[str, Any] | None:
+    """按主题稳定 ID 查目录项。"""
     return next((item for item in theme_catalog() if item["id"] == theme_id), None)
 
 
 def _layout_usage(name: str) -> str:
+    """为常见 layout 生成中文语义用途，供 LLM 选择布局。"""
     if any(token in name for token in ("cover", "intro", "lead")):
         return "封面、开场或章节引入；使用短标题和一句核心信息"
     if "section" in name:
@@ -52,6 +62,7 @@ def _layout_usage(name: str) -> str:
 
 
 def _fallback_capabilities(theme: dict[str, Any]) -> dict[str, Any]:
+    """renderer 不可用时从目录 layouts 构造保守能力描述。"""
     return {
         "schema_version": 2,
         "theme_spec": f"{theme['package']}@{theme['version']}",
@@ -79,6 +90,7 @@ def _fallback_capabilities(theme: dict[str, Any]) -> dict[str, Any]:
 
 @lru_cache(maxsize=32)
 def get_theme_capabilities(theme_id: str) -> dict[str, Any]:
+    """优先读取 renderer 解析结果，失败则返回 fallback。"""
     theme = get_theme(theme_id)
     if not theme:
         raise ValueError("THEME_NOT_FOUND")
@@ -111,6 +123,7 @@ def get_theme_capabilities(theme_id: str) -> dict[str, Any]:
 
 
 def select_theme(context: LessonContext, preferred_theme_id: str | None = None) -> dict[str, Any]:
+    """尊重用户显式选择，否则按课程关键词做确定性推荐。"""
     if preferred_theme_id and (preferred := get_theme(preferred_theme_id)):
         result = {key: value for key, value in preferred.items() if key != "match_terms"}
         result["match_reason"] = "创建项目时已选择此模板"
@@ -147,6 +160,7 @@ def select_theme(context: LessonContext, preferred_theme_id: str | None = None) 
 
 
 def prepare_project_theme(project_id: str, theme_id: str) -> None:
+    """请求 renderer 下载或复用缓存，并保存项目能力快照。"""
     theme = get_theme(theme_id)
     if not theme:
         raise ValueError("THEME_NOT_FOUND")
@@ -167,6 +181,7 @@ def prepare_project_theme(project_id: str, theme_id: str) -> None:
 
 
 def delete_project_theme(project_id: str) -> None:
+    """只删项目绑定快照，不删供其他项目复用的全局主题缓存。"""
     settings = get_settings()
     root = settings.theme_cache_dir.resolve()
     target = (root / project_id).resolve()

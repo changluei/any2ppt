@@ -1,3 +1,10 @@
+/**
+ * 前后端共享语义的 TypeScript 视图。
+ *
+ * 字段名保持后端 snake_case，减少响应转换层；修改这些类型时同时检查
+ * backend/app/schemas/api.py。这里不包含 Vue 页面状态，只描述 API 数据。
+ */
+
 export type Project = {
   id: string
   name: string

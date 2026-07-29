@@ -1,3 +1,4 @@
+/** 四类知识库目录、个人资料生命周期与多库检索请求。 */
 import { http, listData, objectData } from './http'
 import type { KnowledgeBase, SearchResult, Source } from '../types'
 

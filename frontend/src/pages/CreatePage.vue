@@ -1,4 +1,10 @@
 <script setup lang="ts">
+/**
+ * 创建首页：浏览/筛选主题，选中后展开生成向导。
+ *
+ * 用户填写独立标题与 PPT 要求，可多选知识库并可选上传资料；提交后建立
+ * generationSession 并跳到锁定页，真正上传和创建任务由 GenerationPage 完成。
+ */
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { ArrowRight, Check, CloseBold, Document, MagicStick, UploadFilled } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -64,6 +70,7 @@ function sourceLabel(theme: ThemeDescriptor) {
 }
 
 async function load() {
+  // 主题目录与知识库目录并行加载；编辑已有项目时再回填项目值。
   loading.value = true
   error.value = ''
   try {
@@ -99,12 +106,14 @@ async function load() {
 }
 
 async function chooseTheme(theme: ThemeDescriptor) {
+  // 选择卡片只改变本地状态并展开向导，真正下载主题发生在创建项目时。
   form.theme_id = theme.id
   await nextTick()
   builder.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 function addFiles(files?: FileList | File[]) {
+  // 请求前先做体验性校验；后端仍会执行权威的格式和体积检查。
   if (!files || saving.value) return
   const incoming = Array.from(files)
   for (const file of incoming) {
@@ -137,6 +146,7 @@ function fillDemo() {
 }
 
 async function saveAndGenerate() {
+  // form.name 与 prompt 分开保存，避免把用户描述错误地用作演示标题。
   const description = prompt.value.trim()
   if (!form.theme_id) return ElMessage.warning('请先选择一个演示主题')
   if (form.name.trim().length < 2) return ElMessage.warning('请先填写 PPT 标题')
@@ -162,6 +172,7 @@ async function saveAndGenerate() {
       return
     }
 
+    // File 留在内存，其余状态进入 sessionStorage，随后由生成锁定页接管。
     beginGenerationSession({
       mode: 'create',
       prompt: description,

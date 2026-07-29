@@ -1,3 +1,10 @@
+"""将选定制品版本导出为 PPTX、教师包或学生包。
+
+优先让独立 Slidev renderer 使用真实主题生成 PPTX；不可用时使用 python-pptx
+生成结构保底版本。作业始终读取创建时冻结的 ArtifactVersion ID，避免编辑
+过程中导出内容悄然变化。
+"""
+
 from __future__ import annotations
 
 import html
@@ -25,6 +32,7 @@ EXPORT_REQUIRED_TYPES = {
 
 
 def _plain_markdown(markdown: str) -> list[str]:
+    """移除 Slidev/Markdown 控制语法，供 python-pptx fallback 使用。"""
     rows: list[str] = []
     in_comment = False
     for raw in markdown.splitlines():
@@ -47,6 +55,7 @@ def _write_pptx(
     slide_deck: dict,
     image_paths: dict[str, Path] | None = None,
 ) -> None:
+    """用 python-pptx 生成不依赖 Node 的保底演示文稿。"""
     from pptx import Presentation
     from pptx.dml.color import RGBColor
     from pptx.enum.text import PP_ALIGN
@@ -132,6 +141,7 @@ def _write_pptx(
 
 
 def _slidev_notes(slide: dict) -> str:
+    """将页面讲稿与引用转换为 Slidev notes 区块。"""
     note = slide.get("speaker_note") or {}
     rows = [
         note.get("explanation", ""),
@@ -145,6 +155,7 @@ def _slidev_notes(slide: dict) -> str:
 
 
 def _placement_html(placement: dict, asset_name: str) -> str:
+    """把百分比图片预设转换为 Slidev 绝对定位 HTML。"""
     position = placement.get("position", "right")
     opacity = placement.get("opacity", 1)
     style = (
@@ -179,6 +190,7 @@ def _prepare_slidev_job(
     slide_deck: dict,
     image_records: dict[str, ProjectImage],
 ) -> None:
+    """在临时 job 目录写入 slides.md、主题配置和图片副本。"""
     public_assets = job_dir / "public" / "assets"
     public_assets.mkdir(parents=True, exist_ok=True)
     asset_names: dict[str, str] = {}
@@ -246,6 +258,7 @@ def _write_slidev_pptx(
     image_records: dict[str, ProjectImage],
     project_id: str | None = None,
 ) -> None:
+    """调用 renderer 生成主题化 PPTX；错误交由作业层记录。"""
     settings = get_settings()
     if not settings.slidev_renderer_url:
         _write_pptx(
@@ -288,6 +301,7 @@ def _write_slidev_pptx(
 
 
 def _load_versions(db: Session, job: ExportJob) -> dict[str, ArtifactVersion]:
+    """按作业快照加载版本，并复核它们都属于当前项目。"""
     selected_ids = list((job.selected_versions or {}).values())
     if selected_ids:
         versions = (
@@ -312,6 +326,7 @@ def _load_versions(db: Session, job: ExportJob) -> dict[str, ArtifactVersion]:
 
 
 def _write_slides(output: Path, slide_deck: dict) -> None:
+    """写出便于审阅和转交的 Markdown 幻灯片源码。"""
     slides = slide_deck.get("slides", [])
     frontmatter = (
         "---\n"
@@ -360,6 +375,7 @@ def _write_slides(output: Path, slide_deck: dict) -> None:
 
 
 def create_export(job_id: str) -> None:
+    """后台执行导出作业，并原子更新状态与最终文件路径。"""
     db = SessionLocal()
     job = db.get(ExportJob, job_id)
     if not job:

@@ -1,3 +1,9 @@
+/**
+ * 核心业务 API 门面：项目、任务、制品、工作流、Agent 和导出。
+ *
+ * 页面只依赖此对象而不直接拼接请求；上传资料和图片因表单/进度逻辑较多，
+ * 分别位于 sources.ts、knowledgeBases.ts 和 images.ts。
+ */
 import { http, listData, objectData } from './http'
 import type { Artifact, EditorAgentChatResult, EditorAgentMessage, ExportJob, GraphState, Project, ProjectInput, Skill, Task, TaskInput, ThemeDescriptor } from '../types'
 export type { ProjectInput } from '../types'

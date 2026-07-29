@@ -1,3 +1,4 @@
+/** 全局后端连通状态；根布局用它展示在线、超时或离线提示。 */
 import { defineStore } from 'pinia'
 import { api } from '../api'
 
@@ -26,4 +27,3 @@ export const useAppStore = defineStore('app', {
     },
   },
 })
-
